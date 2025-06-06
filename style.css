@@ -1,0 +1,70 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f0f0f0;
+}
+
+header {
+  background-color: white;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #ccc;
+}
+
+.logo {
+  height: 60px;
+  margin-right: 20px;
+}
+
+h1 {
+  margin: 0;
+  flex-grow: 1;
+  text-align: center;
+  font-size: 1.5rem;
+}
+
+.main-layout {
+  display: flex;
+  justify-content: space-between;
+  padding: 20px;
+}
+
+.format-window,
+.all-formats-window {
+  padding: 20px;
+  background: #f9f9f9;
+  border: 1px solid #ccc;
+  width: 45%;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+
+.parts-list {
+  margin-top: 10px;
+}
+
+.part-entry {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 10px;
+}
+
+.part-entry input[type="text"] {
+  flex-grow: 1;
+}
+
+select {
+  min-width: 120px;
+}
+
+button {
+  margin-top: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+input[type="checkbox"] {
+  transform: scale(1.2);
+  accent-color: #0078D4;
+}

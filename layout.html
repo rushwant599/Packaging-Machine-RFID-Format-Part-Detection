@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Customer RFID Portal</title>
+  <link rel="stylesheet" href="style.css" />
+  <script defer src="features.js"></script>
+  <script defer src="translations.js"></script>
+</head>
+<body>
+  <header>
+    <img src="somic-logo.png" alt="Somic Logo" class="logo">
+    <h1>Customer RFID Portal</h1>
+  </header>
+
+  <main class="main-layout">
+    <!-- Left Side: Format 1 -->
+    <section class="format-window">
+      <h2>Format 1</h2>
+      <div id="assigned-parts-list" class="parts-list"></div>
+      <div class="final-check">
+        <label><input type="checkbox" id="final-check" disabled> All parts assigned</label>
+      </div>
+    </section>
+
+    <!-- Right Side: All Formats -->
+    <section class="all-formats-window">
+      <h2>All Formats</h2>
+      <div id="format-parts-list" class="parts-list"></div>
+      <button onclick="readRFIDTags()">Read RFID Tags</button>
+    </section>
+  </main>
+</body>
+</html>

@@ -9,7 +9,7 @@ export default function SomicPage() {
 
   function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password === "cimos9160") {
+    if (password === "a") {
       setUnlocked(true);
       setError("");
     } else {

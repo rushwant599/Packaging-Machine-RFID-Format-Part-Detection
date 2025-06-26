@@ -1,6 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.*
@@ -10,34 +10,114 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# Python Dependencies & Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.egg-info/
+*.py[cod]
+*$py.class
+__pycache__/
+*.so
 
-# next.js
+# Testing
+/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Next.js Build Files
 /.next/
 /out/
+.next/
 
-# production
+# Production Build
 /build
+/dist
 
-# misc
+# Environment Files
+.env*
+!.env.example
+backend/.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Cache & Temporary Files
 .DS_Store
 *.pem
-
-# debug
+.turbo/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# vercel
+# OS Files
+Thumbs.db
+.DS_Store
+*.tmp
+*.temp
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Deployment
 .vercel
 
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
 
+# Application Specific
 customer-html-cache.html
+*.sqlite
+*.db
+uploads/
+logs/
+*.log
+
+# Backup Files
+*.bak
+*.backup
+*~
+
+# Package Manager Lock Files (optional - choose one)
+# Uncomment if you want to ignore lock files
+# package-lock.json
+# yarn.lock
+
+# Runtime & Process Files
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage Reports
+coverage/
+.nyc_output
+
+# Jupyter Notebook Checkpoints (if you add notebooks later)
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# Certificates & Keys
+*.key
+*.crt
+*.pem
+certificates/

@@ -1,19 +1,40 @@
 "use client";
 import Header from "@/components/Header";
 import { useState } from "react";
+import { useAPI } from "@/lib/api-client";
 
 export default function SomicPage() {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const api = useAPI();
 
-  function handlePasswordSubmit(e: React.FormEvent) {
+  async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password === "a") {
-      setUnlocked(true);
-      setError("");
-    } else {
-      setError("Falsches Passwort!");
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await api.verifyPassword(password);
+      if (response.success) {
+        setUnlocked(true);
+        setError("");
+      } else {
+        setError(response.message);
+      }
+    } catch (err) {
+      console.error("Password verification failed:", err);
+      setError("Verbindung zum Server fehlgeschlagen. Fallback wird verwendet.");
+      // Fallback to original logic if backend is not available
+      if (password === "a") {
+        setUnlocked(true);
+        setError("");
+      } else {
+        setError("Falsches Passwort!");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -39,9 +60,10 @@ export default function SomicPage() {
             {error && <div className="text-red-600">{error}</div>}
             <button
               type="submit"
-              className="px-3 py-1 bg-blue-600 text-white rounded"
+              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              disabled={loading}
             >
-              Login
+              {loading ? "Prüfe..." : "Login"}
             </button>
           </form>
         ) : (

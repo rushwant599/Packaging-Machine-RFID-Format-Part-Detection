@@ -25,6 +25,30 @@ export interface RFIDTag {
   last_scanned: string;
 }
 
+export interface OPCUAStatus {
+  enabled: boolean;
+  available: boolean;
+  connection_status: string;
+  server_url?: string;
+  node_id?: string;
+  last_updated?: string;
+  current_value?: {
+    value: any;
+    data_type: string;
+    timestamp: string;
+  };
+}
+
+export interface OPCUAValueResponse {
+  success: boolean;
+  data: {
+    value: any;
+    data_type: string;
+    timestamp: string;
+  };
+  last_updated: string;
+}
+
 class APIClient {
   private baseURL: string;
 
@@ -111,6 +135,27 @@ class APIClient {
 
   async getFormatPartsPerFormat() {
     return this.request('/api/format-parts-per-format');
+  }
+
+  // OPC UA methods
+  async getOPCUAStatus(): Promise<OPCUAStatus> {
+    return this.request('/api/opc-ua/status');
+  }
+
+  async getOPCUAValue(): Promise<OPCUAValueResponse> {
+    return this.request('/api/opc-ua/value');
+  }
+
+  async refreshOPCUAValue(): Promise<OPCUAValueResponse> {
+    return this.request('/api/opc-ua/refresh', {
+      method: 'POST',
+    });
+  }
+
+  async reconnectOPCUA(): Promise<{success: boolean, message: string, status: string}> {
+    return this.request('/api/opc-ua/reconnect', {
+      method: 'POST',
+    });
   }
 }
 

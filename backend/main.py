@@ -3,12 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import os
-import re
-import json
-from pathlib import Path
 import logging
+from pathlib import Path
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
+
+# Local modules
+from opc_client import OPCUAManager
+from format_parser import FormatDataManager
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -19,14 +21,49 @@ load_dotenv("../.env.docker")  # Load Docker env if available
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="RFID Parts Backend", version="1.0.0")
-
 # Get configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 
+# OPC UA Configuration
+OPC_UA_ENABLED = os.getenv("OPC_UA_ENABLED", "false").lower() == "true"
+OPC_UA_SERVER_URL = os.getenv("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+OPC_UA_NODE_ID = os.getenv("OPC_UA_NODE_ID", "ns=2;i=1")
+
 logger.info(f"Configuration - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
+logger.info(f"OPC UA - Enabled: {OPC_UA_ENABLED}, Server: {OPC_UA_SERVER_URL}, Node: {OPC_UA_NODE_ID}")
+
+# Initialize managers
+opc_manager = None
+format_manager = None
+
+# FastAPI lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global opc_manager, format_manager
+    
+    # Startup
+    logger.info("Starting RFID Parts Backend...")
+    
+    # Initialize OPC UA manager
+    if OPC_UA_ENABLED:
+        opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+        await opc_manager.start_monitoring()
+    
+    # Initialize format data manager
+    cache_dir = Path(__file__).parent.parent
+    html_cache_path = cache_dir / "customer-html-cache.html"
+    format_manager = FormatDataManager(str(html_cache_path))
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down RFID Parts Backend...")
+    if opc_manager:
+        await opc_manager.stop_monitoring()
+
+app = FastAPI(title="RFID Parts Backend", version="1.0.0", lifespan=lifespan)
 
 # Configure CORS to allow requests from your Next.js frontend
 app.add_middleware(
@@ -77,11 +114,32 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """Detailed health check"""
-    return {
+    health_data = {
         "status": "healthy",
         "version": "1.0.0",
         "cache_file_exists": HTML_CACHE_PATH.exists()
     }
+    
+    # Add OPC UA status if enabled
+    if opc_manager:
+        opc_status = await opc_manager.get_status()
+        health_data["opc_ua"] = {
+            "enabled": opc_status["enabled"],
+            "available": opc_status["available"],
+            "connection_status": opc_status["connection_status"],
+            "has_value": opc_status["current_value"] is not None,
+            "last_updated": opc_status["last_updated"]
+        }
+    else:
+        health_data["opc_ua"] = {
+            "enabled": False,
+            "available": False,
+            "connection_status": "disabled",
+            "has_value": False,
+            "last_updated": None
+        }
+    
+    return health_data
 
 @app.post("/api/verify-password")
 async def verify_password(request: PasswordRequest):
@@ -168,99 +226,12 @@ async def get_rfid_tags():
         }
     ]
 
-# HTML Format Data Parser Functions
-def _read_html_file(filepath):
-    """Read HTML file content"""
-    if not os.path.isfile(filepath):
-        raise FileNotFoundError(f"Die Datei '{filepath}' wurde nicht gefunden.")
-    with open(filepath, 'r', encoding='utf-8') as file:
-        return file.read()
-
-
-def _extract_script_content(soup):
-    """Extract script content from FormatData element"""
-    script_element = soup.find(id="FormatData")
-    if not script_element:
-        return None
-    script_content = script_element.get_text(strip=True)
-    return re.sub(r'[\u0000-\u001F\u007F-\u009F]', '', script_content)
-
-
-def _extract_formats_json(script_content):
-    """Extract formats JSON from script content"""
-    match = re.search(r'var\s+formats\s*=\s*({[\s\S]*?});', script_content)
-    if not match:
-        return None
-    return match.group(1)
-
-
-def _collect_format_parts(formats_data):
-    """Collect all unique format parts"""
-    format_parts_set = set()
-    for fmt in formats_data.values():
-        data_items = fmt.get("data", [])
-        if not isinstance(data_items, list):
-            continue
-        for item in data_items:
-            part = item.get("formatPart")
-            if not part:
-                continue
-            part = part.strip()
-            if part == "FTL." or re.match(r'^-+$', part):
-                continue
-            format_parts_set.add(part)
-    return sorted(format_parts_set)
-
-
-def _collect_format_parts_per_format(formats_data):
-    """Collect format parts grouped by format"""
-    format_parts_per_format = {}
-    for format_name, fmt in formats_data.items():
-        data_items = fmt.get("data", [])
-        if not isinstance(data_items, list):
-            continue
-        format_parts = set()
-        for item in data_items:
-            part = item.get("formatPart")
-            if not part:
-                continue
-            part = part.strip()
-            if part == "FTL." or re.match(r'^-+$', part):
-                continue
-            format_parts.add(part)
-        format_parts_per_format[format_name] = sorted(format_parts)
-    return format_parts_per_format
-
-
-def parse_format_data_from_file(filepath):
-    """Parse format data from HTML file"""
-    html_content = _read_html_file(filepath)
-    soup = BeautifulSoup(html_content, 'html.parser')
-    format_data = {}
-
-    script_content = _extract_script_content(soup)
-    if not script_content:
-        return format_data
-
-    formats_json_str = _extract_formats_json(script_content)
-    if not formats_json_str:
-        return format_data
-
-    try:
-        formats_data = json.loads(formats_json_str)
-        format_data['formats'] = formats_data
-        format_data['formatParts'] = _collect_format_parts(formats_data)
-        format_data['formatPartsPerFormat'] = _collect_format_parts_per_format(formats_data)
-    except json.JSONDecodeError as e:
-        raise ValueError("Fehler beim Parsen von JSON nach Sanitize: " + str(e))
-
-    return format_data
-
+# Format Data Endpoints (using FormatDataManager)
 @app.get("/api/format-data")
 async def get_format_data():
     """Parse and return format data from customer HTML cache"""
     try:
-        if not HTML_CACHE_PATH.exists():
+        if not format_manager.file_exists():
             return FormatParseResponse(
                 success=False,
                 message="Customer HTML cache file not found. Please upload a file first.",
@@ -268,7 +239,7 @@ async def get_format_data():
             )
         
         # Parse the format data
-        format_data = parse_format_data_from_file(str(HTML_CACHE_PATH))
+        format_data = format_manager.get_format_data()
         
         if not format_data:
             return FormatParseResponse(
@@ -285,12 +256,6 @@ async def get_format_data():
             formatCount=len(format_data.get('formats', {}))
         )
         
-    except FileNotFoundError as e:
-        logger.error(f"File not found: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        logger.error(f"JSON parsing error: {e}")
-        raise HTTPException(status_code=400, detail=f"Format parsing error: {str(e)}")
     except Exception as e:
         logger.error(f"Error parsing format data: {e}")
         raise HTTPException(status_code=500, detail="Internal server error while parsing format data")
@@ -299,18 +264,7 @@ async def get_format_data():
 async def get_format_parts():
     """Get only the format parts list"""
     try:
-        if not HTML_CACHE_PATH.exists():
-            return {"formatParts": [], "message": "No HTML file uploaded"}
-        
-        format_data = parse_format_data_from_file(str(HTML_CACHE_PATH))
-        format_parts = format_data.get('formatParts', [])
-        
-        return {
-            "formatParts": format_parts,
-            "count": len(format_parts),
-            "message": f"Found {len(format_parts)} unique format parts"
-        }
-        
+        return format_manager.get_format_parts()
     except Exception as e:
         logger.error(f"Error getting format parts: {e}")
         return {"formatParts": [], "error": str(e)}
@@ -319,19 +273,7 @@ async def get_format_parts():
 async def get_formats():
     """Get the complete formats data"""
     try:
-        if not HTML_CACHE_PATH.exists():
-            return {"formats": {}, "message": "No HTML file uploaded"}
-        
-        format_data = parse_format_data_from_file(str(HTML_CACHE_PATH))
-        formats = format_data.get('formats', {})
-        
-        return {
-            "formats": formats,
-            "formatNames": list(formats.keys()),
-            "count": len(formats),
-            "message": f"Found {len(formats)} formats"
-        }
-        
+        return format_manager.get_formats()
     except Exception as e:
         logger.error(f"Error getting formats: {e}")
         return {"formats": {}, "error": str(e)}
@@ -340,21 +282,107 @@ async def get_formats():
 async def get_format_parts_per_format():
     """Get format parts grouped by format"""
     try:
-        if not HTML_CACHE_PATH.exists():
-            return {"formatPartsPerFormat": {}, "message": "No HTML file uploaded"}
-        
-        format_data = parse_format_data_from_file(str(HTML_CACHE_PATH))
-        format_parts_per_format = format_data.get('formatPartsPerFormat', {})
-        
-        return {
-            "formatPartsPerFormat": format_parts_per_format,
-            "formatCount": len(format_parts_per_format),
-            "message": f"Found parts for {len(format_parts_per_format)} formats"
-        }
-        
+        return format_manager.get_format_parts_per_format()
     except Exception as e:
         logger.error(f"Error getting format parts per format: {e}")
         return {"formatPartsPerFormat": {}, "error": str(e)}
+
+# OPC UA API Endpoints
+@app.get("/api/opc-ua/status")
+async def get_opc_ua_status():
+    """Get OPC UA connection status and configuration"""
+    if not opc_manager:
+        return {
+            "enabled": False,
+            "available": False,
+            "connection_status": "disabled",
+            "server_url": None,
+            "node_id": None,
+            "last_updated": None,
+            "current_value": None
+        }
+    
+    return await opc_manager.get_status()
+
+@app.get("/api/opc-ua/value")
+async def get_opc_ua_value():
+    """Get current OPC UA node value"""
+    if not opc_manager:
+        raise HTTPException(status_code=400, detail="OPC UA is disabled")
+    
+    status = await opc_manager.get_status()
+    
+    if not status["available"]:
+        raise HTTPException(status_code=500, detail="OPC UA library not available")
+    
+    if status["connection_status"] != "connected":
+        raise HTTPException(status_code=503, detail=f"OPC UA not connected: {status['connection_status']}")
+    
+    current_value = await opc_manager.get_current_value()
+    if current_value is None:
+        raise HTTPException(status_code=404, detail="No value available yet")
+    
+    return {
+        "success": True,
+        "data": current_value,
+        "last_updated": status["last_updated"]
+    }
+
+@app.post("/api/opc-ua/refresh")
+async def refresh_opc_ua_value():
+    """Force refresh of OPC UA node value"""
+    if not opc_manager:
+        raise HTTPException(status_code=400, detail="OPC UA is disabled")
+    
+    status = await opc_manager.get_status()
+    
+    if not status["available"]:
+        raise HTTPException(status_code=500, detail="OPC UA library not available")
+    
+    if status["connection_status"] != "connected":
+        raise HTTPException(status_code=503, detail="OPC UA not connected")
+    
+    try:
+        value_data = await opc_manager.refresh_value()
+        if value_data:
+            return {
+                "success": True,
+                "message": "Value refreshed successfully",
+                "data": value_data
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to read node value")
+    except Exception as e:
+        logger.error(f"Error refreshing OPC UA value: {e}")
+        raise HTTPException(status_code=500, detail=f"Error refreshing value: {str(e)}")
+
+@app.post("/api/opc-ua/reconnect")
+async def reconnect_opc_ua():
+    """Force reconnection to OPC UA server"""
+    if not opc_manager:
+        raise HTTPException(status_code=400, detail="OPC UA is disabled")
+    
+    status = await opc_manager.get_status()
+    
+    if not status["available"]:
+        raise HTTPException(status_code=500, detail="OPC UA library not available")
+    
+    try:
+        success = await opc_manager.reconnect()
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Successfully reconnected to OPC UA server",
+                "status": "connected"
+            }
+        else:
+            new_status = await opc_manager.get_status()
+            raise HTTPException(status_code=503, detail=f"Failed to reconnect: {new_status['connection_status']}")
+            
+    except Exception as e:
+        logger.error(f"Error reconnecting to OPC UA: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reconnecting: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -95,6 +95,23 @@ class APIClient {
   async getRFIDTags(): Promise<RFIDTag[]> {
     return this.request<RFIDTag[]>('/api/rfid/tags');
   }
+
+  // Format data operations
+  async getFormatData() {
+    return this.request('/api/format-data');
+  }
+
+  async getFormatParts(): Promise<{formatParts: string[], count: number, message: string}> {
+    return this.request('/api/format-parts');
+  }
+
+  async getFormats() {
+    return this.request('/api/formats');
+  }
+
+  async getFormatPartsPerFormat() {
+    return this.request('/api/format-parts-per-format');
+  }
 }
 
 // Export a default instance

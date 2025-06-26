@@ -14,7 +14,7 @@
   <main class="main-layout">
     <!-- Left Side: Format 1 -->
     <section class="format-window">
-      <h2>Format 1</h2>
+      <h2>Format 1 - Assigned Parts</h2>
       <div id="assigned-parts-list" class="parts-list"></div>
       <div class="final-check">
         <label><input type="checkbox" id="final-check" disabled> All parts assigned</label>
@@ -23,9 +23,12 @@
 
     <!-- Right Side: All Formats -->
     <section class="all-formats-window">
-      <h2>All Formats</h2>
+      <h2>All Format Parts</h2>
+      <div class="controls">
+        <button onclick="readRFIDTags()">Read RFID Tags</button>
+        <button onclick="refreshFormatParts()">🔄 Refresh Parts</button>
+      </div>
       <div id="format-parts-list" class="parts-list"></div>
-      <button onclick="readRFIDTags()">Read RFID Tags</button>
     </section>
   </main>
 </body>

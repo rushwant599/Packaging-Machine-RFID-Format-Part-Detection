@@ -35,3 +35,10 @@ Start the container with:
 ```docker run -d -p 8080:3000 test```
 
 You should now be able to access the Editor/HTML in your browser via: http://localhost:8080
+
+
+Endpoint	                        Beschreibung	            Response
+GET /api/format-data	            Komplette Format-Daten	    Alle geparsten Daten
+GET /api/format-parts	            Nur Format-Teile	        Liste aller formatParts
+GET /api/formats	                Nur Formats	                Alle Format-Objekte
+GET /api/format-parts-per-format	Gruppierte Format-Teile	    Nach Format gruppiert

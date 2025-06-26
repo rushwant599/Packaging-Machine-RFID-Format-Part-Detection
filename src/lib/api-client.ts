@@ -33,7 +33,7 @@ export interface OPCUAStatus {
   node_id?: string;
   last_updated?: string;
   current_value?: {
-    value: any;
+    value: unknown;
     data_type: string;
     timestamp: string;
   };
@@ -42,7 +42,7 @@ export interface OPCUAStatus {
 export interface OPCUAValueResponse {
   success: boolean;
   data: {
-    value: any;
+    value: unknown;
     data_type: string;
     timestamp: string;
   };

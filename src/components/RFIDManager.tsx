@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAPI, RFIDTag, RFIDData } from "@/lib/api-client";
 
 export default function RFIDManager() {
@@ -15,11 +15,7 @@ export default function RFIDManager() {
   
   const api = useAPI();
 
-  useEffect(() => {
-    loadTags();
-  }, []);
-
-  const loadTags = async () => {
+  const loadTags = useCallback(async () => {
     try {
       setLoading(true);
       const data = await api.getRFIDTags();
@@ -30,7 +26,11 @@ export default function RFIDManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [api]);
+
+  useEffect(() => {
+    loadTags();
+  }, [loadTags]);
 
   const handleScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

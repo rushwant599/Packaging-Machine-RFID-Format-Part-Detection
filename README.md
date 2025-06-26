@@ -17,11 +17,17 @@ Multilingual Support: Switch between German, Czech, Spanish, French, Italian, an
 Somic-branded Interface: Integrates official branding and styling for customer delivery.
 
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Getting Started
+First, install dependencies
+```npm ci``` or ```npm install```
 
-## To test the html in docker use the provided dockerfile for a simple webserver.
+Then, run the development server:
 
-### Build and Deploy locally
+```npm run dev```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+## Build and Deploy locally
 Build the container with: 
 ```docker build -t test .```
 
@@ -29,14 +35,3 @@ Start the container with:
 ```docker run -d -p 8080:3000 test```
 
 You should now be able to access the Editor/HTML in your browser via: http://localhost:8080
-
-
-### Use nodeJS
-First install dependencies locally:
-```npm install express```
-```npm install --save-dev nodemon```
-To start the server:
-```npm start```
-To start the Dev server:
-```npm run dev```
-

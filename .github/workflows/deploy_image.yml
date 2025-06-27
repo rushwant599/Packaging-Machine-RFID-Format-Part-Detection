@@ -1,46 +1,54 @@
-name: deploy_image.yml
+name: Deploy Image
 on:
-  workflow_call:
-    inputs:
-      tag:
-        type: string
-        required: true
+  push:
+    branches: [main, develop]
+    tags: ['*']
+  workflow_dispatch:  # Für manuellen Test
+
 jobs:
-  docker:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      
+      - id: namespace
+        uses: ./.github/actions/lowercase
         with:
-          pattern: rfid-app_*
-          path: ${{ runner.temp }}
-          merge-multiple: 'true'
-      - name: Log in to the Container registry
+          input: ${{ github.repository }}
+      
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/checkout@v4
-      - id: namespace
-        uses: ./.github/actions/lowercase
+      
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v3
         with:
-          input: ${{ github.repository }}
-      - name: Load and push images
-        run: |
-          docker load -i ${{ runner.temp }}/rfid-app_${{ inputs.tag }}_x86_64-unknown-linux-gnu.tar
-          docker load -i ${{ runner.temp }}/rfid-app_${{ inputs.tag }}_aarch64-unknown-linux-gnu.tar
-
-          docker push --platform linux/amd64 ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}-amd64 
-          docker push --platform linux/arm64 ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}-arm64
-
-          docker manifest create ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }} \
-            ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}-amd64 \
-            ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}-arm64
-
-          docker manifest push ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}
+          platforms: linux/amd64,linux/arm64
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.namespace.outputs.output }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

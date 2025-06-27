@@ -1,0 +1,45 @@
+name: build_image.yml
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      build_type:
+        type: string
+        required: false
+        default: release
+jobs:
+  docker:
+    name: Build docker image
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: "x86_64-unknown-linux-gnu"
+            platform: linux/amd64
+            platform_short: amd64
+          - target: "aarch64-unknown-linux-gnu"
+            platform: linux/arm64
+            platform_short: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - id: namespace
+        uses: ./.github/actions/lowercase
+        with:
+          input: ${{ github.repository }}
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+      - name: Build and export
+        uses: docker/build-push-action@v6
+        with:
+          tags: ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}-${{ matrix.platform_short }}
+          outputs: type=docker,dest=${{ runner.temp }}/rfid-app_${{ inputs.tag }}_${{ matrix.target }}.tar
+          file: ./dockerfile
+          platforms: ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rfid-app_${{ inputs.tag }}_${{ matrix.target }}
+          path: ${{ runner.temp }}/rfid-app_${{ inputs.tag }}_${{ matrix.target }}.tar

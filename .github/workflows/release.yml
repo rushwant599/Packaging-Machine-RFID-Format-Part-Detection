@@ -1,0 +1,20 @@
+name: release.yml
+on:
+  release:
+    types: [ published ]
+jobs:
+  build:
+    uses: ./.github/workflows/build_image.yml
+    with:
+      tag: ${{ github.event.release.tag_name }}
+      build_type: 'release'
+  deploy:
+    needs: [ build ]
+    uses: ./.github/workflows/deploy_image.yml
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    with:
+      tag: ${{ github.event.release.tag_name }}

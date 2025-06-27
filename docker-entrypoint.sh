@@ -14,17 +14,17 @@ cleanup() {
 # Set up signal handlers
 trap cleanup SIGTERM SIGINT
 
-# Start Python backend in background
-echo "Starting Python Backend on port 8001..."
+# Starte Backend im Hintergrund
+echo "Starting Backend..."
 cd /app/backend
 python main.py &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start
-sleep 3
+sleep 5
 
-# Start Next.js frontend in background
-echo "Starting Next.js Frontend on port 3000..."
+# Starte Frontend
+echo "Starting Frontend..."
 cd /app
 npm start &
 FRONTEND_PID=$!
@@ -35,5 +35,5 @@ echo "Frontend: http://localhost:3000"
 echo "Backend: http://localhost:8001"
 echo "API Docs: http://localhost:8001/docs"
 
-# Keep the script running and wait for either process to exit
+# Warte auf beide Prozesse
 wait $BACKEND_PID $FRONTEND_PID

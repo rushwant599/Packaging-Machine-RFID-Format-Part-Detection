@@ -152,6 +152,8 @@ app.add_middleware(
         "http://localhost:3001", 
         "http://127.0.0.1:3001",
         "http://0.0.0.0:3000",
+        "http://localhost:8001", 
+        "http://0.0.0.0:8001",
         "http://0.0.0.0:3001"
     ],  # Next.js ports
     allow_credentials=True,
@@ -591,5 +593,18 @@ async def get_assignment_for_format_part(format_part: str):
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting RFID Backend on {BACKEND_HOST}:{BACKEND_PORT}")
-    uvicorn.run("main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=DEBUG)
+
+    # Docker-kompatible Konfiguration
+    host = os.getenv("BACKEND_HOST", "0.0.0.0")  # 0.0.0.0 für Docker
+    port = int(os.getenv("BACKEND_PORT", "8001"))
+    debug = os.getenv("DEBUG", "false").lower() == "true"
+
+    logger.info(f"Starting RFID Backend on {host}:{port}")
+    uvicorn.run(
+        "main:app",
+        host=host,
+        port=port,
+        reload=debug,
+        access_log=True,
+        log_level="debug" if debug else "info"
+    )

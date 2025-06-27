@@ -54,7 +54,7 @@ COPY --from=frontend-builder /app/node_modules ./node_modules
 
 # Copy startup scripts
 COPY docker-entrypoint.sh ./
-COPY .env.docker ./
+COPY .env.docker* ./
 
 # Set environment variables
 ENV NODE_ENV=production

@@ -13,6 +13,7 @@ from typing import List
 # Local modules
 from opc_client import OPCUAManager
 from format_parser import FormatDataManager
+from simple_assignment_db import SimpleAssignmentManager
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -55,6 +56,7 @@ logger.info(f"  - OPC UA Node: {OPC_UA_NODE_ID}")
 # Initialize managers
 opc_manager = None
 format_manager = None
+assignment_manager = None
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -101,10 +103,16 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, format_manager
+    global opc_manager, format_manager, assignment_manager
     
     # Startup
     logger.info("Starting RFID Parts Backend...")
+    
+    # Initialize Simple Assignment Database
+    data_dir = Path(__file__).parent.parent / "data"
+    data_dir.mkdir(exist_ok=True)
+    assignment_manager = SimpleAssignmentManager(str(data_dir / "format_assignments.db"))
+    await assignment_manager.initialize()
     
     # Initialize OPC UA manager
     if OPC_UA_ENABLED:
@@ -126,6 +134,10 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down RFID Parts Backend...")
+    if opc_manager:
+        await opc_manager.stop_monitoring()
+    if assignment_manager:
+        await assignment_manager.close()
     if opc_manager:
         await opc_manager.stop_monitoring()
 
@@ -164,6 +176,14 @@ class RFIDData(BaseModel):
     customer_name: str
     part_number: str
     description: str
+
+class FormatPartAssignmentRequest(BaseModel):
+    format_part: str
+    rfid_tag_id: str
+
+class FormatPartAssignmentResponse(BaseModel):
+    success: bool
+    message: str
 
 class FormatParseResponse(BaseModel):
     success: bool
@@ -486,6 +506,88 @@ async def test_broadcast_value_change():
     await websocket_manager.broadcast_value_change(test_data)
     
     return {"success": True, "message": "Broadcast triggered", "data": test_data}
+
+# Format Part Assignment API Endpoints
+@app.get("/api/format-assignments")
+async def get_format_assignments():
+    """Get all format part to RFID tag assignments"""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    
+    try:
+        assignments = await assignment_manager.get_all_assignments()
+        assignments_list = await assignment_manager.get_assignments_list()
+        
+        return {
+            "success": True,
+            "assignments": assignments,  # Dict format for frontend compatibility
+            "assignments_list": assignments_list,  # List format with metadata
+            "count": len(assignments)
+        }
+    except Exception as e:
+        logger.error(f"Error getting format assignments: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving assignments")
+
+@app.post("/api/format-assignments")
+async def assign_rfid_to_format_part(assignment: FormatPartAssignmentRequest):
+    """Assign an RFID tag to a format part"""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    
+    try:
+        success = await assignment_manager.assign_rfid_to_part(
+            format_part=assignment.format_part,
+            rfid_tag_id=assignment.rfid_tag_id
+        )
+        
+        if success:
+            return FormatPartAssignmentResponse(
+                success=True,
+                message=f"Successfully assigned {assignment.rfid_tag_id} to {assignment.format_part}"
+            )
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create assignment")
+            
+    except Exception as e:
+        logger.error(f"Error creating format assignment: {e}")
+        raise HTTPException(status_code=500, detail="Error creating assignment")
+
+@app.delete("/api/format-assignments/{format_part}")
+async def unassign_rfid_from_format_part(format_part: str):
+    """Remove RFID assignment from a format part"""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    
+    try:
+        success = await assignment_manager.unassign_rfid_from_part(format_part)
+        
+        if success:
+            return {"success": True, "message": f"Unassigned RFID from {format_part}"}
+        else:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+            
+    except Exception as e:
+        logger.error(f"Error removing assignment for {format_part}: {e}")
+        raise HTTPException(status_code=500, detail="Error removing assignment")
+
+@app.get("/api/format-assignments/{format_part}")
+async def get_assignment_for_format_part(format_part: str):
+    """Get RFID tag assigned to a specific format part"""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    
+    try:
+        rfid_tag_id = await assignment_manager.get_assignment_for_part(format_part)
+        
+        return {
+            "success": True,
+            "format_part": format_part,
+            "rfid_tag_id": rfid_tag_id
+        }
+            
+    except Exception as e:
+        logger.error(f"Error getting assignment for {format_part}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving assignment")
 
 if __name__ == "__main__":
     import uvicorn

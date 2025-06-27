@@ -1,5 +1,6 @@
 let rfidTags = [];
 let formatParts = []; // Dynamic format parts from API
+let assignments = {}; // Format part -> RFID tag assignments from database
 
 // API configuration
 const API_BASE_URL = 'http://localhost:8001';
@@ -48,6 +49,8 @@ function updateDropdowns() {
   const partRows = document.querySelectorAll('.rfid-select');
   partRows.forEach(select => {
     const currentValue = select.value;
+    const partId = select.id.replace('select-', '');
+    
     select.innerHTML = '';
     rfidTags.forEach(tag => {
       const opt = document.createElement('option');
@@ -55,22 +58,49 @@ function updateDropdowns() {
       opt.textContent = tag === "" ? "(unassigned)" : tag;
       select.appendChild(opt);
     });
-    select.value = currentValue;
+    
+    // Set value from database if available
+    if (assignments[partId]) {
+      select.value = assignments[partId];
+    } else {
+      select.value = currentValue;
+    }
   });
 }
 
-function assignRFID(partId) {
+async function assignRFID(partId) {
   const select = document.getElementById('select-' + partId);
   const value = select.value;
   const checkbox = document.getElementById('check-' + partId);
-  checkbox.checked = value !== "";
-  checkAllAssigned();
+  
+  // Save to database
+  const success = await saveAssignment(partId, value);
+  
+  if (success) {
+    checkbox.checked = value !== "";
+    checkAllAssigned();
+  } else {
+    // Revert on error
+    alert('Fehler beim Speichern der Zuordnung');
+    select.value = assignments[partId] || "";
+  }
 }
 
 function checkAllAssigned() {
   const checkboxes = document.querySelectorAll('.assign-check');
   const allChecked = [...checkboxes].every(cb => cb.checked);
   document.getElementById('final-check').checked = allChecked;
+}
+
+function updateAssignmentDisplay() {
+  // Update checkboxes based on assignments
+  formatParts.forEach(p => {
+    const checkbox = document.getElementById('check-' + p.id);
+    if (checkbox) {
+      checkbox.checked = !!assignments[p.id];
+    }
+  });
+  checkAllAssigned();
 }
 
 function updatePartsDisplay() {
@@ -115,12 +145,93 @@ function updatePartsDisplay() {
   
   // Update dropdowns with RFID tags
   updateDropdowns();
+  
+  // Update assignment display
+  updateAssignmentDisplay();
+  
   console.log(`Updated display with ${formatParts.length} format parts`);
 }
 
 async function refreshFormatParts() {
-  console.log('Refreshing format parts...');
+  console.log('Refreshing format parts and assignments...');
   await loadFormatParts();
+  await loadAssignments();
+}
+
+// Load assignments from database
+async function loadAssignments() {
+  try {
+    console.log('Loading assignments from database...');
+    const response = await fetch(`${API_BASE_URL}/api/format-assignments`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('Assignments loaded:', data);
+    
+    if (data.success && data.assignments) {
+      assignments = data.assignments;
+      console.log(`Loaded ${Object.keys(assignments).length} assignments:`, assignments);
+      updateAssignmentDisplay();
+    } else {
+      console.warn('No assignments found in API response');
+      assignments = {};
+      updateAssignmentDisplay();
+    }
+  } catch (error) {
+    console.error('Error loading assignments:', error);
+    assignments = {};
+    updateAssignmentDisplay();
+  }
+}
+
+// Save assignment to database
+async function saveAssignment(formatPart, rfidTagId) {
+  try {
+    console.log(`Saving assignment: ${formatPart} -> ${rfidTagId}`);
+    
+    if (!rfidTagId || rfidTagId === "") {
+      // Unassign RFID from format part
+      const response = await fetch(`${API_BASE_URL}/api/format-assignments/${formatPart}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        delete assignments[formatPart];
+        console.log(`Unassigned RFID from ${formatPart}`);
+        return true;
+      } else {
+        console.error('Failed to unassign RFID');
+        return false;
+      }
+    } else {
+      // Assign RFID to format part
+      const response = await fetch(`${API_BASE_URL}/api/format-assignments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          format_part: formatPart,
+          rfid_tag_id: rfidTagId
+        })
+      });
+      
+      if (response.ok) {
+        assignments[formatPart] = rfidTagId;
+        console.log(`Assigned ${rfidTagId} to ${formatPart}`);
+        return true;
+      } else {
+        console.error('Failed to save assignment');
+        return false;
+      }
+    }
+  } catch (error) {
+    console.error('Error saving assignment:', error);
+    return false;
+  }
 }
 
 // Initialize the application
@@ -132,6 +243,9 @@ window.onload = async () => {
   
   // Load format parts from API
   await loadFormatParts();
+  
+  // Load assignments from database
+  await loadAssignments();
   
   console.log('Application initialized successfully');
 };

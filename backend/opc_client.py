@@ -6,7 +6,7 @@ Handles OPC UA server connections, node monitoring, and data retrieval.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, List
 
 # OPC UA imports
 try:
@@ -99,7 +99,38 @@ class OPCUAManager:
         self.last_updated: Optional[datetime] = None
         self.connection_status = "disconnected"
         self.monitoring_task: Optional[asyncio.Task] = None
+        
+        # Event system for value changes
+        self.value_change_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self.last_notified_value = None
     
+    def add_value_change_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """Add a callback that will be called when the value changes"""
+        self.value_change_callbacks.append(callback)
+    
+    def remove_value_change_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """Remove a value change callback"""
+        if callback in self.value_change_callbacks:
+            self.value_change_callbacks.remove(callback)
+    
+    async def _notify_value_change(self, new_value: Dict[str, Any]):
+        """Notify all callbacks about value change"""
+        # Only notify if value actually changed
+        current_val = new_value.get("value")
+        if current_val != self.last_notified_value:
+            self.last_notified_value = current_val
+            logger.info(f"OPC UA value changed to: {current_val}")
+            
+            # Call all registered callbacks
+            for callback in self.value_change_callbacks:
+                try:
+                    if asyncio.iscoroutinefunction(callback):
+                        await callback(new_value)
+                    else:
+                        callback(new_value)
+                except Exception as e:
+                    logger.error(f"Error in value change callback: {e}")
+
     async def start_monitoring(self):
         """Start the background monitoring task"""
         if not self.enabled:
@@ -143,9 +174,15 @@ class OPCUAManager:
                     # Read node value
                     value_data = await self.client.read_node_value()
                     if value_data:
+                        # Check if value changed and notify callbacks
+                        old_value = self.current_value
                         self.current_value = value_data
                         self.last_updated = datetime.now()
                         self.connection_status = "connected"
+                        
+                        # Notify callbacks if value changed
+                        if old_value is None or old_value.get("value") != value_data.get("value"):
+                            await self._notify_value_change(value_data)
                     
                     await asyncio.sleep(5)  # Update every 5 seconds
                 else:

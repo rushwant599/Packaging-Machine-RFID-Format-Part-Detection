@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+import json
+from typing import List
 
 # Local modules
 from opc_client import OPCUAManager
@@ -14,8 +16,21 @@ from format_parser import FormatDataManager
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
-load_dotenv(env_path)
-load_dotenv("../.env.docker")  # Load Docker env if available
+root_env_local = Path(__file__).parent.parent / ".env.local"
+root_env_example = Path(__file__).parent.parent / ".env.example"
+
+# Load in priority order (later files override earlier ones)
+load_dotenv(env_path)  # backend/.env
+load_dotenv(root_env_example)  # root/.env.example (fallback)
+load_dotenv(root_env_local)  # root/.env.local (highest priority)
+load_dotenv("../.env.docker")  # Docker env if available
+
+logger = logging.getLogger(__name__)
+logger.info(f"Environment files loaded:")
+logger.info(f"  - backend/.env: {env_path.exists()}")
+logger.info(f"  - root/.env.example: {root_env_example.exists()}")
+logger.info(f"  - root/.env.local: {root_env_local.exists()}")
+logger.info(f"  - ../.env.docker: {Path('../.env.docker').exists()}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,12 +46,57 @@ OPC_UA_ENABLED = os.getenv("OPC_UA_ENABLED", "false").lower() == "true"
 OPC_UA_SERVER_URL = os.getenv("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
 OPC_UA_NODE_ID = os.getenv("OPC_UA_NODE_ID", "ns=2;i=1")
 
-logger.info(f"Configuration - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
-logger.info(f"OPC UA - Enabled: {OPC_UA_ENABLED}, Server: {OPC_UA_SERVER_URL}, Node: {OPC_UA_NODE_ID}")
+logger.info(f"Configuration loaded:")
+logger.info(f"  - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
+logger.info(f"  - OPC UA Enabled: {OPC_UA_ENABLED}")
+logger.info(f"  - OPC UA Server: {OPC_UA_SERVER_URL}")
+logger.info(f"  - OPC UA Node: {OPC_UA_NODE_ID}")
 
 # Initialize managers
 opc_manager = None
 format_manager = None
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+
+    async def broadcast_value_change(self, data: dict):
+        """Broadcast value change to all connected clients"""
+        if not self.active_connections:
+            return
+            
+        message = json.dumps({
+            "type": "value_change",
+            "data": data,
+            "timestamp": data.get("timestamp")
+        })
+        
+        # Send to all connected clients
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                logger.error(f"Error sending WebSocket message: {e}")
+                disconnected.append(connection)
+        
+        # Remove disconnected connections
+        for conn in disconnected:
+            self.disconnect(conn)
+
+# Global connection manager
+websocket_manager = ConnectionManager()
 
 # FastAPI lifespan context manager
 @asynccontextmanager
@@ -49,6 +109,12 @@ async def lifespan(app: FastAPI):
     # Initialize OPC UA manager
     if OPC_UA_ENABLED:
         opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+        
+        # Register callback for value changes
+        async def value_change_callback(new_value):
+            await websocket_manager.broadcast_value_change(new_value)
+        
+        opc_manager.add_value_change_callback(value_change_callback)
         await opc_manager.start_monitoring()
     
     # Initialize format data manager
@@ -383,6 +449,43 @@ async def reconnect_opc_ua():
     except Exception as e:
         logger.error(f"Error reconnecting to OPC UA: {e}")
         raise HTTPException(status_code=500, detail=f"Error reconnecting: {str(e)}")
+
+# WebSocket endpoint for OPC UA updates
+@app.websocket("/ws/opc-ua")
+async def websocket_opc_ua_updates(websocket: WebSocket):
+    """WebSocket endpoint for OPC UA event updates"""
+    await websocket_manager.connect(websocket)
+    
+    try:
+        while True:
+            # Wait for a message from the client (optional, if you want to receive messages)
+            data = await websocket.receive_text()
+            logger.info(f"Received WebSocket message: {data}")
+            
+            # You can add logic here to handle incoming WebSocket messages if needed
+            
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        websocket_manager.disconnect(websocket)
+
+# Example: Trigger OPC UA value change broadcast (for testing)
+@app.post("/api/test/broadcast-value-change")
+async def test_broadcast_value_change():
+    """Test endpoint to trigger a broadcast of OPC UA value change"""
+    test_data = {
+        "tag_id": "RFID001",
+        "customer_name": "Customer A",
+        "part_number": "PART-001",
+        "description": "Sample part 1",
+        "timestamp": "2025-06-26T12:00:00Z"
+    }
+    
+    # Broadcast to all WebSocket clients
+    await websocket_manager.broadcast_value_change(test_data)
+    
+    return {"success": True, "message": "Broadcast triggered", "data": test_data}
 
 if __name__ == "__main__":
     import uvicorn

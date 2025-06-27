@@ -12,6 +12,9 @@ services:
       - BACKEND_HOST=0.0.0.0
       - BACKEND_PORT=8001
       - DEBUG=false
+      - OPC_UA_SERVER_URL=opc.tcp://192.168.18.8:4840
+      - OPC_UA_NODE_ID=ns=2;s=.G_HMI.stCM.sFormatAktiv
+      - OPC_UA_ENABLED=true
     volumes:
       # Mount for persistent data if needed
       - ./customer-html-cache.html:/app/customer-html-cache.html

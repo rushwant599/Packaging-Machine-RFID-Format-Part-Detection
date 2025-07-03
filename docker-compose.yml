@@ -24,7 +24,7 @@ services:
       - DATABASE_URL=sqlite:///app/data/rfid_assignments.db
     volumes:
       - ./data:/app/data  # Für SQLite Database
-      - ./customer-html-cache.html:/app/customer-html-cache.html
+      - ./app:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/api/health", "&&", "curl", "-f", "http://localhost:3000"]

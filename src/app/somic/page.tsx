@@ -1,14 +1,42 @@
 "use client";
 import Header from "@/components/Header";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAPI } from "@/lib/api-client";
+
+const defaultConfig = {
+  OPC_UA_SERVER_URL: "",
+  OPC_UA_NODE_ID: "",
+  OPC_UA_ENABLED: false,
+  RFID_OPC_ENABLED: false,
+};
+
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
 
 export default function SomicPage() {
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState(defaultConfig);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [showConfig, setShowConfig] = useState(false);
   const api = useAPI();
+
+  useEffect(() => {
+    fetch(`${backendUrl}/api/config`)
+      .then((res) => res.json())
+      .then((data) => {
+        setConfig({
+          OPC_UA_SERVER_URL: data.OPC_UA_SERVER_URL || "",
+          OPC_UA_NODE_ID: data.OPC_UA_NODE_ID || "",
+          OPC_UA_ENABLED: !!data.OPC_UA_ENABLED,
+          RFID_OPC_ENABLED: !!data.RFID_OPC_ENABLED,
+        });
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,6 +65,34 @@ export default function SomicPage() {
       setLoading(false);
     }
   }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
+    setConfig((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg("");
+    try {
+      const res = await fetch(`${backendUrl}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (res.ok) {
+        setSaveMsg("Configuration saved successfully.");
+      } else {
+        setSaveMsg("Failed to save configuration.");
+      }
+    } catch {
+      setSaveMsg("Failed to save configuration.");
+    }
+    setSaving(false);
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: "100vh" }}>
@@ -67,13 +123,96 @@ export default function SomicPage() {
             </button>
           </form>
         ) : (
-          <div className="w-full h-full">
+          <div className="w-full h-full relative">
+            <button
+              onClick={() => setShowConfig((v) => !v)}
+              className="absolute top-2 right-2 z-10 px-3 py-1 bg-gray-200  text-gray-800  rounded shadow hover:bg-blue-200 dark:hover:bg-blue-800"
+            >
+              {showConfig ? "Close Settings" : "Settings"}
+            </button>
             <iframe
               src="/somic.html"
               className="w-full h-full border-0"
               style={{ minHeight: "80vh" }}
               title="Somic Inhalt"
             />
+            {showConfig && (
+              <div className="absolute top-12 right-2 z-20 bg-white border border-gray-300 rounded shadow-lg p-6 w-[350px] max-w-full">
+                <h2 className="text-xl font-semibold mb-4 text-black">Configuration</h2>
+                {loading ? (
+                  <p>Loading configuration...</p>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSave();
+                    }}
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="block text-sm font-medium text-black">
+                        OPC UA Server URL
+                      </label>
+                      <input
+                        type="text"
+                        name="OPC_UA_SERVER_URL"
+                        value={config.OPC_UA_SERVER_URL}
+                        onChange={handleChange}
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black">
+                        OPC UA Node ID
+                      </label>
+                      <input
+                        type="text"
+                        name="OPC_UA_NODE_ID"
+                        value={config.OPC_UA_NODE_ID}
+                        onChange={handleChange}
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
+                      />
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="OPC_UA_ENABLED"
+                        checked={config.OPC_UA_ENABLED}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label className="ml-2 block text-sm text-black">
+                        Enable OPC UA
+                      </label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="RFID_OPC_ENABLED"
+                        checked={config.RFID_OPC_ENABLED}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label className="ml-2 block text-sm text-black">
+                        Enable RFID OPC
+                      </label>
+                    </div>
+                    <div>
+                      <button
+                        type="submit"
+                        disabled={saving}
+                        className="w-full inline-flex justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      >
+                        {saving ? "Saving..." : "Save"}
+                      </button>
+                    </div>
+                    {saveMsg && (
+                      <div className="text-sm text-green-600">{saveMsg}</div>
+                    )}
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>

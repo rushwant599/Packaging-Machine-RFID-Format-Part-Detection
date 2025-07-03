@@ -2,18 +2,19 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from typing import Optional, List
 import os
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import json
-from typing import List
 
 # Local modules
 from opc_client import OPCUAManager
 from format_parser import FormatDataManager
 from simple_assignment_db import SimpleAssignmentManager
+from config_manager import load_config, save_config
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -114,16 +115,20 @@ async def lifespan(app: FastAPI):
     assignment_manager = SimpleAssignmentManager(str(data_dir / "format_assignments.db"))
     await assignment_manager.initialize()
     
-    # Initialize OPC UA manager
-    if OPC_UA_ENABLED:
+    # OPC UA Manager: Starte automatisch, wenn in Config aktiviert
+    from config_manager import load_config
+    config = load_config()
+    opc_manager = None
+    if config.get("OPC_UA_ENABLED", False):
+        from opc_client import OPCUAManager
+        OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+        OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
         opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
-        
-        # Register callback for value changes
         async def value_change_callback(new_value):
             await websocket_manager.broadcast_value_change(new_value)
-        
         opc_manager.add_value_change_callback(value_change_callback)
         await opc_manager.start_monitoring()
+        logger.info("OPC UA client auto-started from config.")
     
     # Initialize format data manager
     cache_dir = Path(__file__).parent.parent
@@ -193,6 +198,12 @@ class FormatParseResponse(BaseModel):
     data: dict = None
     formatParts: list = None
     formatCount: int = 0
+
+class ConfigUpdate(BaseModel):
+    OPC_UA_SERVER_URL: Optional[str] = None
+    OPC_UA_NODE_ID: Optional[str] = None
+    OPC_UA_ENABLED: Optional[bool] = None
+    RFID_OPC_ENABLED: Optional[bool] = None
 
 @app.get("/")
 async def root():
@@ -590,6 +601,66 @@ async def get_assignment_for_format_part(format_part: str):
     except Exception as e:
         logger.error(f"Error getting assignment for {format_part}: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving assignment")
+
+@app.get("/api/config")
+def get_config():
+    config = load_config()
+    logger.info(f"Config GET: {config}")
+    return config
+
+@app.post("/api/config")
+async def update_config(update: ConfigUpdate):
+    global opc_manager
+    config = load_config()
+    changed = False
+    opc_ua_enabled_before = config.get("OPC_UA_ENABLED", False)
+    opc_ua_enabled_after = update.OPC_UA_ENABLED if update.OPC_UA_ENABLED is not None else opc_ua_enabled_before
+    # Track if OPC UA config changed
+    opc_ua_config_changed = False
+    for key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED", "RFID_OPC_ENABLED"]:
+        value = getattr(update, key)
+        if value is not None:
+            logger.info(f"Config UPDATE: {key} = {value}")
+            config[key] = value
+            changed = True
+            if key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED"]:
+                opc_ua_config_changed = True
+    if changed:
+        save_config(config)
+        logger.info(f"Config SAVED: {config}")
+        # Live reload OPC UA client if enabled/disabled or config changed
+        if opc_ua_config_changed:
+            if opc_ua_enabled_before != opc_ua_enabled_after:
+                if opc_ua_enabled_after:
+                    # Enable OPC UA client
+                    from opc_client import OPCUAManager
+                    OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+                    OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
+                    opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+                    async def value_change_callback(new_value):
+                        await websocket_manager.broadcast_value_change(new_value)
+                    opc_manager.add_value_change_callback(value_change_callback)
+                    await opc_manager.start_monitoring()
+                    logger.info("OPC UA client enabled and started live.")
+                else:
+                    # Disable OPC UA client
+                    if opc_manager:
+                        await opc_manager.stop_monitoring()
+                        opc_manager = None
+                        logger.info("OPC UA client stopped and disabled live.")
+            elif opc_manager and opc_ua_enabled_after:
+                # If config changed but still enabled, restart client with new config
+                await opc_manager.stop_monitoring()
+                from opc_client import OPCUAManager
+                OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+                OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
+                opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+                async def value_change_callback(new_value):
+                    await websocket_manager.broadcast_value_change(new_value)
+                opc_manager.add_value_change_callback(value_change_callback)
+                await opc_manager.start_monitoring()
+                logger.info("OPC UA client restarted live with new config.")
+    return config
 
 if __name__ == "__main__":
     import uvicorn

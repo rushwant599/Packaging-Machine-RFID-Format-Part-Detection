@@ -43,7 +43,7 @@ export default function CustomerPage() {
           }
         } else {
           const errorData = await response.json().catch(() => ({}));
-          setActiveFormat(errorData.detail ?? "Backend nicht erreichbar");
+          setActiveFormat(errorData.detail ?? "OPC-UA Server nicht erreichbar");
           setConnectionStatus('error');
         }
       } catch (error) {

@@ -1,13 +1,12 @@
 "use client";
 import Header from "@/components/Header";
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 export default function CustomerPage() {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [activeFormat, setActiveFormat] = useState<string | null>(null);
   const [formatLoading, setFormatLoading] = useState<boolean>(true);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'error'>('connecting');
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Beim Laden die aktuelle Datei vom Server holen
   useEffect(() => {
@@ -120,25 +119,6 @@ export default function CustomerPage() {
     };
   }, []);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const formData = new FormData();
-      formData.append("file", file);
-      // Datei an den Server senden
-      const res = await fetch("/api/customer-html", {
-        method: "POST",
-        body: formData,
-      });
-      if (res.ok) {
-        // Nach erfolgreichem Upload neu laden
-        const html = await res.text();
-        const blob = new Blob([html], { type: "text/html" });
-        setFileUrl(URL.createObjectURL(blob));
-      }
-    }
-  };
-
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: "100vh" }}>
       <Header profile="Customer" />
@@ -151,14 +131,6 @@ export default function CustomerPage() {
           style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem" }}
         >
           <div className="flex flex-wrap items-center gap-4">
-            <input
-              id="html-upload"
-              type="file"
-              accept=".html"
-              ref={inputRef}
-              onChange={handleFileChange}
-              style={{ color: "#666", paddingTop: 0, paddingBottom: 0 }}
-            />
             <div className="flex items-center gap-2">
               <span style={{ color: "#666", fontWeight: "500" }}>
                 Aktives Format:

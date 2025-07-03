@@ -1,6 +1,6 @@
 "use client";
 import Header from "@/components/Header";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAPI } from "@/lib/api-client";
 
 const defaultConfig = {
@@ -21,7 +21,9 @@ export default function SomicPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
   const api = useAPI();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch(`${backendUrl}/api/config`)
@@ -139,6 +141,52 @@ export default function SomicPage() {
             {showConfig && (
               <div className="absolute top-12 right-2 z-20 bg-white border border-gray-300 rounded shadow-lg p-6 w-[350px] max-w-full">
                 <h2 className="text-xl font-semibold mb-4 text-black">Configuration</h2>
+                {/* Datei-Upload für HTML-Cache */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Kunden-HTML hochladen
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {/* Inline Upload-Icon (SVG) */}
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M7.5 12l4.5-4.5m0 0l4.5 4.5m-4.5-4.5V18" />
+                    </svg>
+                    Datei auswählen
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    id="html-upload"
+                    type="file"
+                    accept=".html"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      setUploadMsg("");
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const formData = new FormData();
+                        formData.append("file", file);
+                        const res = await fetch(`${backendUrl}/api/customer-html`, {
+                          method: "POST",
+                          body: formData,
+                        });
+                        if (res.ok) {
+                          setUploadMsg("HTML-Datei erfolgreich hochgeladen.");
+                        } else {
+                          setUploadMsg("Fehler beim Hochladen der HTML-Datei.");
+                        }
+                        // Reset input, damit gleiche Datei erneut hochgeladen werden kann
+                        e.target.value = "";
+                      }
+                    }}
+                  />
+                  {uploadMsg && (
+                    <div className={`mt-2 text-sm ${uploadMsg.includes("erfolgreich") ? "text-green-600" : "text-red-600"}`}>{uploadMsg}</div>
+                  )}
+                </div>
                 {loading ? (
                   <p>Loading configuration...</p>
                 ) : (

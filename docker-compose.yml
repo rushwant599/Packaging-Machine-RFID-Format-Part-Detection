@@ -6,25 +6,10 @@ services:
     ports:
       - "3000:3000"   # Frontend
       - "8001:8001"   # Backend API
-    environment:
-      # Frontend
-      - NODE_ENV=production
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8001
-      # Backend
-      - BACKEND_HOST=0.0.0.0
-      - BACKEND_PORT=8001
-      - DEBUG=false
-      # OPC UA
-      - OPC_UA_SERVER_URL=opc.tcp://192.168.18.8:4840
-      - OPC_UA_NODE_ID=ns=2;s=.G_HMI.stCM.sFormatAktiv
-      - OPC_UA_ENABLED=true
-      # RFID
-      - RFID_OPC_ENABLED=false
-      # Database
-      - DATABASE_URL=sqlite:///app/data/rfid_assignments.db
+    env_file:
+      - .env.example
     volumes:
-      - ./data:/app/data  # Für SQLite Database
-      - ./app:/app
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/api/health", "&&", "curl", "-f", "http://localhost:3000"]

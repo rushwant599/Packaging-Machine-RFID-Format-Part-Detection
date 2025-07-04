@@ -25,7 +25,7 @@ export default function Header({ profile }: { profile: string }) {
           src="/somic-logo.png"
           alt="Somic Logo"
           width={100}
-          height={20}
+          height={100}
         />
       </div>
       {/* App-Name mittig */}

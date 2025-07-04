@@ -141,10 +141,10 @@ export default function SomicPage() {
             {showConfig && (
               <div className="absolute top-12 right-2 z-20 bg-white border border-gray-300 rounded shadow-lg p-6 w-[350px] max-w-full">
                 <h2 className="text-xl font-semibold mb-4 text-black">Configuration</h2>
-                {/* Datei-Upload für HTML-Cache */}
+                {/* Select File für HTML-Cache */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-black mb-1">
-                    Kunden-HTML hochladen
+                    Upload-Formatchangelist
                   </label>
                   <button
                     type="button"
@@ -155,7 +155,7 @@ export default function SomicPage() {
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M7.5 12l4.5-4.5m0 0l4.5 4.5m-4.5-4.5V18" />
                     </svg>
-                    Datei auswählen
+                    Select File
                   </button>
                   <input
                     ref={fileInputRef}
@@ -174,9 +174,9 @@ export default function SomicPage() {
                           body: formData,
                         });
                         if (res.ok) {
-                          setUploadMsg("HTML-Datei erfolgreich hochgeladen.");
+                          setUploadMsg("HTML-File uploaded successfully.");
                         } else {
-                          setUploadMsg("Fehler beim Hochladen der HTML-Datei.");
+                          setUploadMsg("Error uploading HTML-File.");
                         }
                         // Reset input, damit gleiche Datei erneut hochgeladen werden kann
                         e.target.value = "";

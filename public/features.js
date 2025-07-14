@@ -68,22 +68,31 @@ function updateDropdowns() {
   });
 }
 
-async function assignRFID(partId) {
+function assignRFID(partId) {
   const select = document.getElementById('select-' + partId);
-  const value = select.value;
   const checkbox = document.getElementById('check-' + partId);
-  
-  // Save to database
-  const success = await saveAssignment(partId, value);
-  
-  if (success) {
-    checkbox.checked = value !== "";
-    checkAllAssigned();
-  } else {
-    // Revert on error
-    alert('Fehler beim Speichern der Zuordnung');
-    select.value = assignments[partId] || "";
+
+  if (!select || !checkbox) {
+    console.error(`Missing elements for part ${partId}`);
+    alert("Failed to assign. UI elements missing.");
+    return;
   }
+
+  const selectedValue = select.value;
+
+  // If user hasn't selected a valid tag
+  if (!selectedValue || selectedValue === "") {
+    alert("Please select a valid RFID tag before assigning.");
+    return;
+  }
+
+  // Simulate successful assignment (can be replaced with API call if needed)
+  checkbox.checked = true;
+
+  // Re-check if all are assigned
+  checkAllAssigned();
+
+  console.log(`Assigned ${selectedValue} to ${partId}`);
 }
 
 function checkAllAssigned() {

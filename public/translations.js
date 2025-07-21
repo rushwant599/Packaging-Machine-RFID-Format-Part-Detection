@@ -14,6 +14,7 @@ const translations = {
     detectedTags: "Detekované RFID tagy",
     language: "Jazyk"
   },
+
   es: {
     title: "Supervisión de RFID",
     activeFormat: "Formato activo",

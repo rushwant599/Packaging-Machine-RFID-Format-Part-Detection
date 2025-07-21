@@ -39,11 +39,33 @@ async function loadFormatParts() {
   }
 }
 
-function readRFIDTags() {
-  // Simulated list of tags
-  rfidTags = ["", "RFID-001", "RFID-002", "RFID-003", "RFID-004"];
+async function readRFIDTags() {
+  try {
+    console.log('Reading RFID tags from server...');
+    const response = await fetch(`${API_BASE_URL}/api/opcua/tags`);
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    const data = await response.json();
+    if (Array.isArray(data.tags)) {
+      rfidTags = ["", ...data.tags]; // blank + fetched tags
+      console.log("RFID tags fetched:", rfidTags);
+      updateDropdowns();
+    } else {
+      throw new Error("Invalid response format");
+    }
+  } catch (error) {
+    console.error("Error fetching RFID tags:", error);
+    alert("Failed to read RFID tags from antenna.");
+  }
+   if (!rfidTags || rfidTags.length === 0) {
+    alert("Please upload a valid format file first.");
+    return;
+  }
+
   updateDropdowns();
 }
+
 
 function updateDropdowns() {
   const partRows = document.querySelectorAll('.rfid-select');
@@ -94,6 +116,7 @@ function assignRFID(partId) {
 
   console.log(`Assigned ${selectedValue} to ${partId}`);
 }
+
 
 function checkAllAssigned() {
   const checkboxes = document.querySelectorAll('.assign-check');
@@ -244,17 +267,85 @@ async function saveAssignment(formatPart, rfidTagId) {
 }
 
 // Initialize the application
-window.onload = async () => {
-  console.log('Initializing RFID Parts Application...');
-  
-  // Load RFID tags
-  readRFIDTags();
-  
-  // Load format parts from API
-  await loadFormatParts();
-  
-  // Load assignments from database
-  await loadAssignments();
-  
-  console.log('Application initialized successfully');
+window.onload = () => {
+  const uploadInput = document.getElementById("fileInput");
+  if (uploadInput) {
+    uploadInput.addEventListener("change", handleFileUpload);
+  }
+  refreshFormatParts();
 };
+
+function handleFileUpload() {
+  const input = document.getElementById('fileInput');
+  const file = input.files[0];
+  if (!file) {
+    alert("Please select a file.");
+    return;
+  }
+
+  function extractFormatsFromDropdown(doc) {
+  const dropdown = doc.querySelector('select'); // First <select> element
+  if (!dropdown) return [];
+
+  const options = Array.from(dropdown.querySelectorAll('option'));
+  return options.map(opt => opt.textContent.trim()).filter(text => text && text.startsWith("Format"));
+}
+
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const htmlContent = e.target.result;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, "text/html");
+    const script = doc.querySelector("#FormatData");
+
+    if (!script) {
+      alert("Invalid format file. No format data found.");
+      return;
+    }
+
+    try {
+  let rawScript = script.innerHTML;
+  
+  // Remove newlines, invisible characters, and sanitize
+  rawScript = rawScript.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+  
+  const match = rawScript.match(/var\s+formats\s*=\s*({[\s\S]*?});?/);
+  if (!match || !match[1]) {
+    alert("Could not parse format data.");
+    return;
+  }
+
+  const formats = JSON.parse(match[1]);
+
+  const formatKeys = Object.keys(formats);
+  if (formatKeys.length === 0) {
+    alert("No formats found.");
+    return;
+  }
+
+  const format = formats[formatKeys[0]];
+  const parts = format.data
+    .map(d => ({ id: d.formatPart }))
+    .filter(p => p.id && p.id !== "FTL." && !/^[-\s]*$/.test(p.id));
+
+  loadParts(parts);
+} catch (err) {
+  console.error("Error parsing format data", err);
+}
+
+const formats = extractFormatsFromDropdown(doc);
+console.log("Extracted formats:", formats);
+
+if (formats.length > 0) {
+  rfidTags = formats;  // Use formats as RFID tags for demo/testing
+  updateDropdowns();
+  alert("The format file uploaded has been read and formats detected.");
+} else {
+  alert("No format options found in uploaded file.");
+}
+
+
+  };
+  reader.readAsText(file);
+}

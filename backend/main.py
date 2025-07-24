@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import json
 
 # Local modules
-from opc_client import OPCUAManager
+from plc_opcua import OPCUAManager
 from format_parser import FormatDataManager
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
     config = load_config()
     opc_manager = None
     if config.get("OPC_UA_ENABLED", False):
-        from opc_client import OPCUAManager
+        from plc_opcua import OPCUAManager
         OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
         OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
         opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
@@ -633,7 +633,7 @@ async def update_config(update: ConfigUpdate):
             if opc_ua_enabled_before != opc_ua_enabled_after:
                 if opc_ua_enabled_after:
                     # Enable OPC UA client
-                    from opc_client import OPCUAManager
+                    from plc_opcua import OPCUAManager
                     OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
                     OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
                     opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
@@ -651,7 +651,7 @@ async def update_config(update: ConfigUpdate):
             elif opc_manager and opc_ua_enabled_after:
                 # If config changed but still enabled, restart client with new config
                 await opc_manager.stop_monitoring()
-                from opc_client import OPCUAManager
+                from plc_opcua import OPCUAManager
                 OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
                 OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
                 opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)

@@ -15,6 +15,7 @@ from plc_opcua import OPCUAManager
 from format_parser import FormatDataManager
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
+from rfid_opcua import RFIDOPCUAClient
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -47,6 +48,11 @@ DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 OPC_UA_ENABLED = os.getenv("OPC_UA_ENABLED", "false").lower() == "true"
 OPC_UA_SERVER_URL = os.getenv("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
 OPC_UA_NODE_ID = os.getenv("OPC_UA_NODE_ID", "ns=2;i=1")
+
+# --- RFID OPC UA Client Instanz ---
+RFID_OPC_URL = os.getenv("RFID_OPC_UA_SERVER_URL", "opc.tcp://localhost:4841")
+RFID_OPC_NODE_ID = os.getenv("RFID_OPC_UA_NODE_ID", "ns=2;i=2")
+RFID_OPC_CLIENT = RFIDOPCUAClient(RFID_OPC_URL, RFID_OPC_NODE_ID)
 
 logger.info(f"Configuration loaded:")
 logger.info(f"  - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
@@ -101,10 +107,10 @@ class ConnectionManager:
 # Global connection manager
 websocket_manager = ConnectionManager()
 
-# FastAPI lifespan context manager
+# --- FastAPI lifespan context manager ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, format_manager, assignment_manager
+    global opc_manager, format_manager, assignment_manager, RFID_OPC_CLIENT
     
     # Startup
     logger.info("Starting RFID Parts Backend...")
@@ -135,6 +141,9 @@ async def lifespan(app: FastAPI):
     html_cache_path = cache_dir / "customer-html-cache.html"
     format_manager = FormatDataManager(str(html_cache_path))
     
+    # RFID OPC UA Client verbinden
+    await RFID_OPC_CLIENT.connect()
+    
     yield
     
     # Shutdown
@@ -145,6 +154,7 @@ async def lifespan(app: FastAPI):
         await assignment_manager.close()
     if opc_manager:
         await opc_manager.stop_monitoring()
+    await RFID_OPC_CLIENT.disconnect()
 
 app = FastAPI(title="RFID Parts Backend", version="1.0.0", lifespan=lifespan)
 
@@ -661,6 +671,13 @@ async def update_config(update: ConfigUpdate):
                 await opc_manager.start_monitoring()
                 logger.info("OPC UA client restarted live with new config.")
     return config
+
+# --- API Endpunkte für RFID OPC UA ---
+@app.get("/rfid/tags")
+async def get_rfid_tags_opcua():
+    """Lese RFID-Tags über OPC UA (Framework, noch nicht implementiert)"""
+    tags = await RFID_OPC_CLIENT.read_tags()
+    return tags
 
 if __name__ == "__main__":
     import uvicorn

@@ -156,6 +156,13 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 
 ---
 
+
+
+## IF your backend contains opcua-client.js:
+npm install node-opcua
+
+
+
 ## License
 
 (c) Somic Verwaltungs GmbH, 2025. Proprietary. For internal use and customer projects only.

@@ -14,8 +14,8 @@ app.get('/', (req, res) => {
 });
 
 // OPC UA config
-const endpointUrl = "opc.tcp://192.168.0.1:4840"; // 🔁 Replace with your antenna's OPC UA URL
-const nodeId = "ns=2;s=RFIDTags"; // 🔁 Replace with actual nodeId returning RFID list
+const endpointUrl = "opc.tcp://10.11.36.216:4840";
+const nodeId = "ns=2;s=LastScanData"; // 🔁 Replace with actual nodeId returning RFID list
 
 app.get('/api/opcua', async (req, res) => {
   const client = OPCUAClient.create({ endpointMustExist: false });

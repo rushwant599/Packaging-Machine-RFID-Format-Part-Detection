@@ -1,8 +1,8 @@
 // opcua-client.js
 const { OPCUAClient, NodeClass } = require("node-opcua");
 
-const endpointUrl = "opc.tcp://<ANTENNA_IP>:4840"; // replace this
-const TAG_LIST_NODE    = "ns=2;s=RFID.Tags";       // replace with real node ID
+const endpointUrl = "opc.tcp://10.11.36.216:4840"; // replace this
+const TAG_LIST_NODE    = "ns=2;s=LastScanData";       // replace with real node ID
 const SESSION_TIMEOUT = 60 * 1000;
 
 async function readRfidTags() {

@@ -6,6 +6,8 @@ import { useAPI } from "@/lib/api-client";
 const defaultConfig = {
   OPC_UA_SERVER_URL: "",
   OPC_UA_NODE_ID: "",
+  RFID_OPC_SERVER_URL: "",
+  RFID_OPC_NODE_ID: "",
   OPC_UA_ENABLED: false,
   RFID_OPC_ENABLED: false,
 };

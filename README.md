@@ -115,6 +115,8 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 | `/api/format-parts`                    | GET    | List all format parts               | `[ ... ]`                        |
 | `/api/formats`                         | GET    | List all formats                    | `[ ... ]`                        |
 | `/api/format-parts-per-format`         | GET    | Format parts grouped by format      | `{ format: [parts] }`            |
+| `/api/rfid-opc-ua/status`              | GET    | RFID status                         | `...`                            |
+| `/api/rfid-opc-ua/value`               | GET    | RFID last value                     | `...`                            |   
 | `/api/verify-password`                 | POST   | Password verification (admin)       | `{ valid: true/false }`          |
 | `/api/health`                          | GET    | Health check                        | `{ status: 'ok' }`               |
 | `/ws/opc-ua`                           | WS     | OPC UA WebSocket stream             | OPC UA values as JSON            |

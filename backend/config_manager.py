@@ -8,7 +8,9 @@ DEFAULT_CONFIG = {
     "OPC_UA_SERVER_URL": "opc.tcp://192.168.18.8:4840",
     "OPC_UA_NODE_ID": "ns=2;s=.G_HMI.stCM.sFormatAktiv",
     "OPC_UA_ENABLED": True,
-    "RFID_OPC_ENABLED": False
+    "RFID_OPC_ENABLED": False,
+    "RFID_OPC_SERVER_URL": "opc.tcp://10.11.36.216:4840",
+    "RFID_OPC_NODE_ID": "ns=4;i=6023"
 }
 
 def load_config() -> Dict[str, Any]:
@@ -19,6 +21,8 @@ def load_config() -> Dict[str, Any]:
         "OPC_UA_NODE_ID": os.environ.get("OPC_UA_NODE_ID"),
         "OPC_UA_ENABLED": os.environ.get("OPC_UA_ENABLED"),
         "RFID_OPC_ENABLED": os.environ.get("RFID_OPC_ENABLED"),
+        "RFID_OPC_SERVER_URL": os.environ.get("RFID_OPC_SERVER_URL"),
+        "RFID_OPC_NODE_ID": os.environ.get("RFID_OPC_NODE_ID")
     }
     for key, value in env_map.items():
         if value is not None:

@@ -56,6 +56,7 @@ logger.info(f"  - OPC UA Node: {OPC_UA_NODE_ID}")
 
 # Initialize managers
 opc_manager = None
+rfid_opc_manager = None
 format_manager = None
 assignment_manager = None
 
@@ -104,7 +105,7 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, format_manager, assignment_manager
+    global opc_manager, rfid_opc_manager, format_manager, assignment_manager
     
     # Startup
     logger.info("Starting RFID Parts Backend...")
@@ -130,6 +131,26 @@ async def lifespan(app: FastAPI):
         await opc_manager.start_monitoring()
         logger.info("OPC UA client auto-started from config.")
     
+    # RFID OPC UA Manager: Separater Client für RFID
+    rfid_opc_manager = None
+    if config.get("RFID_OPC_ENABLED", False):
+        from opc_client import OPCUAManager
+        RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4840")
+        RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
+        rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
+        async def rfid_value_change_callback(new_value):
+            # Spezielle Behandlung für RFID-Werte
+            rfid_data = {
+                "type": "rfid_scan",
+                "tag_id": new_value.get("value"),
+                "timestamp": new_value.get("timestamp")
+            }
+            await websocket_manager.broadcast_value_change(rfid_data)
+        rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
+        await rfid_opc_manager.start_monitoring()
+        logger.info("RFID OPC UA client auto-started from config.")
+    
+    
     # Initialize format data manager
     cache_dir = Path(__file__).parent.parent
     html_cache_path = cache_dir / "customer-html-cache.html"
@@ -141,6 +162,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down RFID Parts Backend...")
     if opc_manager:
         await opc_manager.stop_monitoring()
+    if rfid_opc_manager:
+        await rfid_opc_manager.stop_monitoring()
     if assignment_manager:
         await assignment_manager.close()
     if opc_manager:
@@ -204,6 +227,8 @@ class ConfigUpdate(BaseModel):
     OPC_UA_NODE_ID: Optional[str] = None
     OPC_UA_ENABLED: Optional[bool] = None
     RFID_OPC_ENABLED: Optional[bool] = None
+    RFID_OPC_SERVER_URL: Optional[str] = None 
+    RFID_OPC_NODE_ID: Optional[str] = None 
 
 @app.get("/")
 async def root():
@@ -231,6 +256,24 @@ async def health_check():
         }
     else:
         health_data["opc_ua"] = {
+            "enabled": False,
+            "available": False,
+            "connection_status": "disabled",
+            "has_value": False,
+            "last_updated": None
+        }
+
+    if rfid_opc_manager:
+        rfid_opc_status = await rfid_opc_manager.get_status()
+        health_data["rfid_opc"] = {
+            "enabled": rfid_opc_status["enabled"],
+            "available": rfid_opc_status["available"],
+            "connection_status": rfid_opc_status["connection_status"],
+            "has_value": rfid_opc_status["current_value"] is not None,
+            "last_updated": rfid_opc_status["last_updated"]
+        }
+    else:
+        health_data["rfid_opc"] = {
             "enabled": False,
             "available": False,
             "connection_status": "disabled",
@@ -427,6 +470,39 @@ async def get_opc_ua_value():
         "last_updated": status["last_updated"]
     }
 
+@app.get("/api/rfid-opc-ua/status")
+async def get_rfid_opc_ua_status():
+    """Get RFID OPC UA connection status"""
+    if not rfid_opc_manager:
+        return {
+            "enabled": False,
+            "available": False,
+            "connection_status": "disabled"
+        }
+    
+    return await rfid_opc_manager.get_status()
+
+@app.get("/api/rfid-opc-ua/value")
+async def get_rfid_opc_ua_value():
+    """Get current RFID OPC UA node value"""
+    if not rfid_opc_manager:
+        raise HTTPException(status_code=400, detail="RFID OPC UA is disabled")
+    
+    status = await rfid_opc_manager.get_status()
+    
+    if status["connection_status"] != "connected":
+        raise HTTPException(status_code=503, detail="RFID OPC UA not connected")
+    
+    current_value = await rfid_opc_manager.get_current_value()
+    if current_value is None:
+        raise HTTPException(status_code=404, detail="No RFID value available")
+    
+    return {
+        "success": True,
+        "data": current_value,
+        "last_updated": status["last_updated"]
+    }
+
 @app.post("/api/opc-ua/refresh")
 async def refresh_opc_ua_value():
     """Force refresh of OPC UA node value"""
@@ -610,57 +686,133 @@ def get_config():
 
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate):
-    global opc_manager
+    global opc_manager, rfid_opc_manager
     config = load_config()
     changed = False
+
+    
+    # Track OPC UA changes
     opc_ua_enabled_before = config.get("OPC_UA_ENABLED", False)
     opc_ua_enabled_after = update.OPC_UA_ENABLED if update.OPC_UA_ENABLED is not None else opc_ua_enabled_before
-    # Track if OPC UA config changed
     opc_ua_config_changed = False
-    for key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED", "RFID_OPC_ENABLED"]:
+    
+    # Track RFID OPC changes
+    rfid_opc_enabled_before = config.get("RFID_OPC_ENABLED", False)
+    rfid_opc_enabled_after = update.RFID_OPC_ENABLED if update.RFID_OPC_ENABLED is not None else rfid_opc_enabled_before
+    rfid_opc_config_changed = False
+    
+    # Update all config values
+    for key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED", 
+                "RFID_OPC_ENABLED", "RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID"]:
         value = getattr(update, key)
         if value is not None:
             logger.info(f"Config UPDATE: {key} = {value}")
             config[key] = value
             changed = True
+            
             if key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED"]:
                 opc_ua_config_changed = True
+            elif key in ["RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID", "RFID_OPC_ENABLED"]:
+                rfid_opc_config_changed = True
+    
     if changed:
         save_config(config)
         logger.info(f"Config SAVED: {config}")
-        # Live reload OPC UA client if enabled/disabled or config changed
+        
+        # Handle OPC UA changes
         if opc_ua_config_changed:
-            if opc_ua_enabled_before != opc_ua_enabled_after:
-                if opc_ua_enabled_after:
-                    # Enable OPC UA client
-                    from opc_client import OPCUAManager
-                    OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
-                    OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
-                    opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
-                    async def value_change_callback(new_value):
-                        await websocket_manager.broadcast_value_change(new_value)
-                    opc_manager.add_value_change_callback(value_change_callback)
-                    await opc_manager.start_monitoring()
-                    logger.info("OPC UA client enabled and started live.")
-                else:
-                    # Disable OPC UA client
-                    if opc_manager:
-                        await opc_manager.stop_monitoring()
-                        opc_manager = None
-                        logger.info("OPC UA client stopped and disabled live.")
-            elif opc_manager and opc_ua_enabled_after:
-                # If config changed but still enabled, restart client with new config
-                await opc_manager.stop_monitoring()
-                from opc_client import OPCUAManager
-                OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
-                OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
-                opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
-                async def value_change_callback(new_value):
-                    await websocket_manager.broadcast_value_change(new_value)
-                opc_manager.add_value_change_callback(value_change_callback)
-                await opc_manager.start_monitoring()
-                logger.info("OPC UA client restarted live with new config.")
+            await handle_opc_ua_config_change(config, opc_ua_enabled_before, opc_ua_enabled_after)
+        
+        # Handle RFID OPC changes
+        if rfid_opc_config_changed:
+            await handle_rfid_opc_config_change(config, rfid_opc_enabled_before, rfid_opc_enabled_after)
+    
     return config
+async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
+    global rfid_opc_manager
+    
+    if enabled_before != enabled_after:
+        if enabled_after:
+            # Enable RFID OPC client
+            from opc_client import OPCUAManager
+            RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
+            RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
+            rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
+            
+            async def rfid_value_change_callback(new_value):
+                rfid_data = {
+                    "type": "rfid_scan",
+                    "tag_id": new_value.get("value"),
+                    "timestamp": new_value.get("timestamp")
+                }
+                await websocket_manager.broadcast_value_change(rfid_data)
+            
+            rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
+            await rfid_opc_manager.start_monitoring()
+            logger.info("RFID OPC client enabled and started live.")
+        else:
+            # Disable RFID OPC client
+            if rfid_opc_manager:
+                await rfid_opc_manager.stop_monitoring()
+                rfid_opc_manager = None
+                logger.info("RFID OPC client stopped and disabled live.")
+    elif rfid_opc_manager and enabled_after:
+        # Restart with new config
+        await rfid_opc_manager.stop_monitoring()
+        from opc_client import OPCUAManager
+        RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
+        RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
+        rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
+        
+        async def rfid_value_change_callback(new_value):
+            rfid_data = {
+                "type": "rfid_scan",
+                "tag_id": new_value.get("value"),
+                "timestamp": new_value.get("timestamp")
+            }
+            await websocket_manager.broadcast_value_change(rfid_data)
+        
+        rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
+        await rfid_opc_manager.start_monitoring()
+        logger.info("RFID OPC client restarted live with new config.")
+
+async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
+    global opc_manager
+    
+    if enabled_before != enabled_after:
+        if enabled_after:
+            # Enable OPC UA client
+            from opc_client import OPCUAManager
+            OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+            OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
+            opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+            
+            async def value_change_callback(new_value):
+                await websocket_manager.broadcast_value_change(new_value)
+            
+            opc_manager.add_value_change_callback(value_change_callback)
+            await opc_manager.start_monitoring()
+            logger.info("OPC UA client enabled and started live.")
+        else:
+            # Disable OPC UA client
+            if opc_manager:
+                await opc_manager.stop_monitoring()
+                opc_manager = None
+                logger.info("OPC UA client stopped and disabled live.")
+    elif opc_manager and enabled_after:
+        # Restart with new config
+        await opc_manager.stop_monitoring()
+        from opc_client import OPCUAManager
+        OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
+        OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
+        opc_manager = OPCUAManager(OPC_UA_SERVER_URL, OPC_UA_NODE_ID, enabled=True)
+        
+        async def value_change_callback(new_value):
+            await websocket_manager.broadcast_value_change(new_value)
+        
+        opc_manager.add_value_change_callback(value_change_callback)
+        await opc_manager.start_monitoring()
+        logger.info("OPC UA client restarted live with new config.")
 
 if __name__ == "__main__":
     import uvicorn

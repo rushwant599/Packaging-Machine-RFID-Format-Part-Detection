@@ -728,6 +728,7 @@ async def update_config(update: ConfigUpdate):
             await handle_rfid_opc_config_change(config, rfid_opc_enabled_before, rfid_opc_enabled_after)
     
     return config
+
 async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
     global rfid_opc_manager
     

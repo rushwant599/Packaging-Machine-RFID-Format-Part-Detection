@@ -139,10 +139,13 @@ async def lifespan(app: FastAPI):
         RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
         rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
         async def rfid_value_change_callback(new_value):
-            # Spezielle Behandlung für RFID-Werte
+            # Persist RFID tag if value present
+            tag_val = new_value.get("value")
+            if tag_val and assignment_manager:
+                await assignment_manager.record_rfid_tag(str(tag_val))
             rfid_data = {
                 "type": "rfid_scan",
-                "tag_id": new_value.get("value"),
+                "tag_id": tag_val,
                 "timestamp": new_value.get("timestamp")
             }
             await websocket_manager.broadcast_value_change(rfid_data)
@@ -503,6 +506,22 @@ async def get_rfid_opc_ua_value():
         "last_updated": status["last_updated"]
     }
 
+@app.get("/api/rfid-tags")
+async def list_rfid_tags():
+    """Return list of known RFID tag IDs with metadata."""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    tags = await assignment_manager.list_rfid_tags()
+    return {"success": True, "tags": tags, "count": len(tags)}
+
+@app.get("/api/rfid-tag-ids")
+async def list_rfid_tag_ids():
+    """Return only tag_id strings for dropdown usage."""
+    if not assignment_manager:
+        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
+    tag_ids = await assignment_manager.get_rfid_tag_ids()
+    return {"success": True, "tagIds": tag_ids}
+
 @app.post("/api/opc-ua/refresh")
 async def refresh_opc_ua_value():
     """Force refresh of OPC UA node value"""
@@ -741,9 +760,12 @@ async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
             rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
             
             async def rfid_value_change_callback(new_value):
+                tag_val = new_value.get("value")
+                if tag_val and assignment_manager:
+                    await assignment_manager.record_rfid_tag(str(tag_val))
                 rfid_data = {
                     "type": "rfid_scan",
-                    "tag_id": new_value.get("value"),
+                    "tag_id": tag_val,
                     "timestamp": new_value.get("timestamp")
                 }
                 await websocket_manager.broadcast_value_change(rfid_data)
@@ -766,9 +788,12 @@ async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
         rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
         
         async def rfid_value_change_callback(new_value):
+            tag_val = new_value.get("value")
+            if tag_val and assignment_manager:
+                await assignment_manager.record_rfid_tag(str(tag_val))
             rfid_data = {
                 "type": "rfid_scan",
-                "tag_id": new_value.get("value"),
+                "tag_id": tag_val,
                 "timestamp": new_value.get("timestamp")
             }
             await websocket_manager.broadcast_value_change(rfid_data)

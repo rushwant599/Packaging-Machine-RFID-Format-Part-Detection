@@ -188,7 +188,7 @@ export default function SomicPage() {
                     }}
                   />
                   {uploadMsg && (
-                    <div className={`mt-2 text-sm ${uploadMsg.includes("erfolgreich") ? "text-green-600" : "text-red-600"}`}>{uploadMsg}</div>
+                    <div className={`mt-2 text-sm ${uploadMsg.includes("successfully") ? "text-green-600" : "text-red-600"}`}>{uploadMsg}</div>
                   )}
                 </div>
                 {loading ? (

@@ -6,7 +6,7 @@ Uses SQLite for local, container-friendly storage.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -33,8 +33,18 @@ class FormatPartAssignment(Base):
     format_part = Column(String(100), nullable=False, unique=True)  # z.B. "1A1", "2B3"
     rfid_tag_id = Column(String(100), nullable=False)  # z.B. "RFID-001"
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_active = Column(Boolean, default=True)
+
+class RFIDTag(Base):
+    """Model for RFID tags observed via OPC UA (deduplicated with metadata)."""
+    __tablename__ = 'rfid_tags'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tag_id = Column(String(100), nullable=False, unique=True)
+    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    read_count = Column(Integer, default=1)
 
 class SimpleAssignmentManager:
     """Manages simple format part to RFID tag assignments"""
@@ -104,7 +114,7 @@ class SimpleAssignmentManager:
                 if existing:
                     # Update existing assignment
                     existing.rfid_tag_id = rfid_tag_id
-                    existing.updated_at = datetime.utcnow()
+                    existing.updated_at = datetime.now(timezone.utc)
                     existing.is_active = True
                 else:
                     # Create new assignment
@@ -140,7 +150,7 @@ class SimpleAssignmentManager:
                 
                 if assignment:
                     assignment.is_active = False
-                    assignment.updated_at = datetime.utcnow()
+                    assignment.updated_at = datetime.now(timezone.utc)
                     await session.commit()
                     logger.info(f"Unassigned RFID from format part {format_part}")
                     return True
@@ -252,6 +262,63 @@ class SimpleAssignmentManager:
         except Exception as e:
             logger.error(f"Error getting assignments list: {e}")
             return []
+
+    # ---------------- RFID Tag Persistence -----------------
+    async def record_rfid_tag(self, tag_id: str) -> bool:
+        """Insert or update an RFID tag observation.
+
+        Increases read_count and updates last_seen when tag already exists.
+        """
+        if not await self.ensure_initialized():
+            return False
+        if not tag_id:
+            return False
+        try:
+            async with self.async_session() as session:
+                from sqlalchemy import select
+                from sqlalchemy.exc import IntegrityError
+
+                result = await session.execute(select(RFIDTag).where(RFIDTag.tag_id == tag_id))
+                tag = result.scalar_one_or_none()
+                if tag:
+                    tag.read_count += 1
+                    tag.last_seen = datetime.now(timezone.utc)
+                else:
+                    session.add(RFIDTag(tag_id=tag_id))
+                await session.commit()
+                return True
+        except IntegrityError:
+            logger.warning("Race condition inserting RFID tag, ignoring.")
+            return True
+        except Exception as e:
+            logger.error(f"Error recording RFID tag {tag_id}: {e}")
+            return False
+
+    async def list_rfid_tags(self) -> List[Dict[str, Any]]:
+        """Return all known RFID tags with metadata."""
+        if not await self.ensure_initialized():
+            return []
+        try:
+            async with self.async_session() as session:
+                from sqlalchemy import select
+                result = await session.execute(select(RFIDTag).order_by(RFIDTag.last_seen.desc()))
+                rows = result.scalars().all()
+                return [
+                    {
+                        "tag_id": r.tag_id,
+                        "first_seen": r.first_seen.isoformat(),
+                        "last_seen": r.last_seen.isoformat(),
+                        "read_count": r.read_count
+                    } for r in rows
+                ]
+        except Exception as e:
+            logger.error(f"Error listing RFID tags: {e}")
+            return []
+
+    async def get_rfid_tag_ids(self) -> List[str]:
+        """Return only the tag_id strings."""
+        tags = await self.list_rfid_tags()
+        return [t["tag_id"] for t in tags]
     
     async def close(self):
         """Close database connections"""

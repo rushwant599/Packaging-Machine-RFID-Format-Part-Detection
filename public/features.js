@@ -39,9 +39,26 @@ async function loadFormatParts() {
   }
 }
 
-function readRFIDTags() {
-  // Simulated list of tags
-  rfidTags = ["", "RFID-001", "RFID-002", "RFID-003", "RFID-004"];
+async function readRFIDTags() {
+  try {
+    console.log('Loading RFID tags from backend...');
+    const response = await fetch(`${API_BASE_URL}/api/rfid-tag-ids`);
+    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+    const data = await response.json();
+    if (data.success && Array.isArray(data.tagIds)) {
+      rfidTags = ["", ...data.tagIds];
+      console.log(`Loaded ${data.tagIds.length} RFID tags.`);
+      updateDropdowns();
+      return;
+    }
+    console.warn('Unexpected RFID tags response structure', data);
+  } catch (e) {
+    console.error('Error loading RFID tags', e);
+  }
+  // Fallback: keep existing rfidTags (no static demo values anymore)
+  if (!rfidTags.length) {
+    rfidTags = [""]; // only unassigned option
+  }
   updateDropdowns();
 }
 

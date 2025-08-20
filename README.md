@@ -65,10 +65,7 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
    ```
 2. **Start the container:**
    ```bash
-   docker run -d -p 3000:3000 -p 8001:8001 --env-file .env \
-     -v $PWD/data:/app/data \
-     -v $PWD/customer-html-cache.html:/app/customer-html-cache.html \
-     format-rfidparts
+   docker run -d -p 3000:3000 -p 8001:8001 --env-file .env.example -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
    ```
 3. **Or with Docker Compose:**
    ```bash

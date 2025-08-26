@@ -213,10 +213,26 @@ def run(args):
                         time.sleep(args.interval)
                         continue
                     cnt, tag_list = parse_line(line)
-                    # EPC Liste extrahieren
-                    epcs = [t['epc'] for t in tag_list] if tag_list else []
                     import json
-                    print(json.dumps(epcs, ensure_ascii=False))
+                    if args.full:
+                        # Volle Objekte ausgeben (evtl. nur relevante Felder auswählen)
+                        out = []
+                        for t in tag_list:
+                            out.append({
+                                'epc': t['epc'],
+                                'pc': t['pc'],
+                                'antenna': t['antenna'],
+                                'rssi_dbm': t['rssi_dbm'],
+                                'power_dbm': t['power_dbm'],
+                                'raw_epc_pc': t['raw_epc_pc'],
+                                'rssi_raw': t['rssi_raw'],
+                                'power_raw': t['power_raw']
+                            })
+                        print(json.dumps(out, ensure_ascii=False))
+                    else:
+                        # Nur EPC Strings
+                        epcs = [t['epc'] for t in tag_list] if tag_list else []
+                        print(json.dumps(epcs, ensure_ascii=False))
                     time.sleep(args.interval)
             except KeyboardInterrupt:
                 print("Abbruch (Ctrl+C)")
@@ -234,6 +250,7 @@ def build_arg_parser():
     p.add_argument('--timeout', type=float, default=0.8, help='Antwort-Timeout pro Poll (Default 0.8)')
     p.add_argument('--connect-timeout', type=float, default=2.0)
     p.add_argument('--limit', type=int, default=0, help='Anzahl Polls (0=unbegrenzt)')
+    p.add_argument('--full', action='store_true', help='Gibt vollständige Tag-Objekte (inkl. RSSI/Power) statt nur EPCs aus')
     return p
 
 

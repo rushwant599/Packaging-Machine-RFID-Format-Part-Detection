@@ -44,10 +44,28 @@ import socket
 import time
 import argparse
 import sys
-from typing import List, Tuple, Dict, Any
+import asyncio
+import logging
+from typing import List, Tuple, Dict, Any, Generator, AsyncGenerator, Optional
+from dataclasses import dataclass, field
 
 REQ_BASE = "sMN IVSingleInv"
 ANS_PREFIX = "sAN IVSingleInv"
+
+logger = logging.getLogger(__name__)
+
+
+# --- Fehlerklassen -----------------------------------------------------------
+class RFUInventoryError(Exception):
+    """Allgemeiner Fehler beim Inventur-Polling."""
+
+
+class RFUConnectionError(RFUInventoryError):
+    """Verbindungsaufbau oder -abbruch fehlgeschlagen."""
+
+
+class RFUProtocolError(RFUInventoryError):
+    """Antwortformat oder Protokollverletzung."""
 
 
 def send_cmd(sock: socket.socket, cmd: str, framed: bool):
@@ -87,6 +105,60 @@ def recv_answer(sock: socket.socket, timeout: float, framed: bool) -> str | None
                 if b == b"\n":
                     break
     except socket.timeout:
+        if not data:
+            return None
+    if not data:
+        return None
+    line = data.decode('ascii', errors='ignore').strip('\r\n')
+    if not line:
+        return None
+    return line
+
+
+# --- Async Varianten ---------------------------------------------------------
+async def send_cmd_async(writer: asyncio.StreamWriter, cmd: str, framed: bool):
+    if framed:
+        writer.write(b"\x02" + cmd.encode('ascii') + b"\x03")
+    else:
+        if not cmd.endswith("\r\n"):
+            cmd = cmd + "\r\n"
+        writer.write(cmd.encode('ascii'))
+    await writer.drain()
+
+
+async def recv_answer_async(reader: asyncio.StreamReader, timeout: float, framed: bool) -> str | None:
+    data = bytearray()
+
+    async def _read_framed():
+        started = False
+        while True:
+            b = await reader.read(1)
+            if not b:
+                break
+            if b == b"\x02" and not started:
+                started = True
+                continue
+            if not started:
+                continue
+            if b == b"\x03":
+                break
+            data.extend(b)
+
+    async def _read_line():
+        while True:
+            b = await reader.read(1)
+            if not b:
+                break
+            data.extend(b)
+            if b == b"\n":
+                break
+
+    try:
+        if framed:
+            await asyncio.wait_for(_read_framed(), timeout=timeout)
+        else:
+            await asyncio.wait_for(_read_line(), timeout=timeout)
+    except asyncio.TimeoutError:
         if not data:
             return None
     if not data:
@@ -195,50 +267,259 @@ def parse_line(line: str) -> Tuple[int, List[Dict[str, Any]]]:
     return tag_count, tags
 
 
-def run(args):
-    addr = (args.ip, args.port)
-    print(f"Verbinde zu {addr} ...")
-    try:
-        with socket.create_connection(addr, timeout=args.connect_timeout) as sock:
-            print("Verbunden.")
-            poll = 0
+@dataclass
+class RFUInventoryClient:
+    """Wiederverwendbare API für IVSingleInv.
+
+    Nutzung:
+        client = RFUInventoryClient(ip="10.11.36.216", ant="F")
+        with client:  # öffnet Verbindung
+            epcs = client.poll_once()            # nur EPCs
+            tags = client.poll_once(full=True)   # detaillierte Tag-Objekte
+
+        # Kontinuierlich:
+        for epcs in client.poll_loop(interval=1.0, limit=0):
+            print(epcs)
+
+    Hauptmethoden:
+        poll_once(full=False) -> List[str] | List[Dict]
+        poll_loop(interval, limit, full) -> Generator
+    """
+
+    ip: str
+    port: int = 2111
+    ant: str = '1'
+    timeout: float = 0.8
+    connect_timeout: float = 2.0
+    framed: bool = True
+    _sock: Optional[socket.socket] = field(default=None, init=False, repr=False)
+
+    # --- Verbindungs-Handling -------------------------------------------------
+    def connect(self):
+        if self._sock is not None:
+            return
+        addr = (self.ip, self.port)
+        try:
+            self._sock = socket.create_connection(addr, timeout=self.connect_timeout)
+            logger.info("Verbunden zu %s:%s", *addr)
+        except OSError as e:
+            logger.error("Verbindung fehlgeschlagen: %s", e)
+            raise RFUConnectionError(str(e)) from e
+
+    def close(self):
+        if self._sock is not None:
             try:
-                while args.limit == 0 or poll < args.limit:
-                    poll += 1
-                    req = f"{REQ_BASE} {args.ant}"
-                    send_cmd(sock, req, framed=True)  # immer gerahmt
-                    line = recv_answer(sock, timeout=args.timeout, framed=True)
-                    if line is None:
-                        print("[]")  # keine Tags
-                        time.sleep(args.interval)
-                        continue
-                    cnt, tag_list = parse_line(line)
-                    import json
-                    if args.full:
-                        # Volle Objekte ausgeben (evtl. nur relevante Felder auswählen)
-                        out = []
-                        for t in tag_list:
-                            out.append({
-                                'epc': t['epc'],
-                                'pc': t['pc'],
-                                'antenna': t['antenna'],
-                                'rssi_dbm': t['rssi_dbm'],
-                                'power_dbm': t['power_dbm'],
-                                'raw_epc_pc': t['raw_epc_pc'],
-                                'rssi_raw': t['rssi_raw'],
-                                'power_raw': t['power_raw']
-                            })
-                        print(json.dumps(out, ensure_ascii=False))
-                    else:
-                        # Nur EPC Strings
-                        epcs = [t['epc'] for t in tag_list] if tag_list else []
-                        print(json.dumps(epcs, ensure_ascii=False))
-                    time.sleep(args.interval)
-            except KeyboardInterrupt:
-                print("Abbruch (Ctrl+C)")
-    except (socket.timeout, OSError) as e:
-        print(f"Verbindungsfehler: {e}")
+                self._sock.close()
+                logger.info("Verbindung geschlossen")
+            finally:
+                self._sock = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    # --- Poll Logik -----------------------------------------------------------
+    def _ensure(self):
+        if self._sock is None:
+            self.connect()
+
+    def poll_once(self, full: bool = False):
+        """Führt genau EIN IVSingleInv aus.
+
+        full=False: Rückgabe List[str] (EPCs)
+        full=True:  Rückgabe List[Dict[str,Any]] (Tag-Objekte)
+        """
+        self._ensure()
+        assert self._sock is not None
+        req = f"{REQ_BASE} {self.ant}"
+        try:
+            send_cmd(self._sock, req, framed=self.framed)
+        except OSError as e:
+            logger.error("Senden fehlgeschlagen: %s", e)
+            raise RFUConnectionError(str(e)) from e
+        line = recv_answer(self._sock, timeout=self.timeout, framed=self.framed)
+        if line is None:
+            logger.debug("Keine Antwort / Timeout")
+            return []
+        logger.debug("RAW Antwort: %s", line)
+        _, tag_list = parse_line(line)
+        if full:
+            # Nur relevante Felder zurückgeben (nicht status/rssi_raw/power_raw zwingend nötig)
+            return [
+                {
+                    'epc': t['epc'],
+                    'pc': t['pc'],
+                    'antenna': t['antenna'],
+                    'rssi_dbm': t['rssi_dbm'],
+                    'power_dbm': t['power_dbm'],
+                    'raw_epc_pc': t['raw_epc_pc'],
+                    'rssi_raw': t['rssi_raw'],
+                    'power_raw': t['power_raw']
+                }
+                for t in tag_list
+            ]
+        return [t['epc'] for t in tag_list]
+
+    def poll_once_safe(self, full: bool = False) -> Tuple[List[Any], Optional[Exception]]:
+        """Wrapper, der Fehler abfängt und als Rückgabe liefert."""
+        try:
+            return self.poll_once(full=full), None
+        except Exception as e:  # noqa: BLE001
+            logger.exception("poll_once Fehler")
+            return [], e
+
+    def poll_loop(self, interval: float = 1.0, limit: int = 0, full: bool = False) -> Generator[List[Any], None, None]:
+        """Endlosschleife (oder begrenzte Anzahl) als Generator.
+
+        yield pro Iteration: Liste wie bei poll_once(full=...)
+        limit=0 => unendlich
+        """
+        poll = 0
+        try:
+            while limit == 0 or poll < limit:
+                poll += 1
+                try:
+                    yield self.poll_once(full=full)
+                except (socket.timeout, OSError):
+                    # Verbindung resetten und leere Liste liefern
+                    self.close()
+                    yield []
+                    # leichter Backoff
+                    time.sleep(min(interval, 0.5))
+                    continue
+                time.sleep(interval)
+        except GeneratorExit:
+            return
+
+
+def run(args):
+    """CLI-Laufzeit (beibehaltet Rückwärtskompatibilität)."""
+    client = RFUInventoryClient(
+        ip=args.ip,
+        port=args.port,
+        ant=args.ant,
+        timeout=args.timeout,
+        connect_timeout=args.connect_timeout,
+        framed=True,
+    )
+    import json
+    try:
+        with client:
+            for result in client.poll_loop(interval=args.interval, limit=args.limit, full=args.full):
+                print(json.dumps(result, ensure_ascii=False))
+    except RFUInventoryError as e:
+        logger.error("RFU Fehler: %s", e)
         sys.exit(1)
+    except KeyboardInterrupt:
+        logger.info("Abbruch durch Benutzer")
+
+
+# --- Async Variante ----------------------------------------------------------
+@dataclass
+class AsyncRFUInventoryClient:
+    ip: str
+    port: int = 2111
+    ant: str = '1'
+    timeout: float = 0.8
+    connect_timeout: float = 2.0
+    framed: bool = True
+    _reader: Optional[asyncio.StreamReader] = field(default=None, init=False, repr=False)
+    _writer: Optional[asyncio.StreamWriter] = field(default=None, init=False, repr=False)
+
+    async def connect(self):
+        if self._reader is not None:
+            return
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self.ip, self.port), timeout=self.connect_timeout
+            )
+            logger.info("(async) Verbunden zu %s:%s", self.ip, self.port)
+        except Exception as e:  # noqa: BLE001
+            logger.error("(async) Verbindung fehlgeschlagen: %s", e)
+            raise RFUConnectionError(str(e)) from e
+
+    async def close(self):
+        if self._writer is not None:
+            try:
+                self._writer.close()
+                await self._writer.wait_closed()
+                logger.info("(async) Verbindung geschlossen")
+            finally:
+                self._reader = None
+                self._writer = None
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+        return False
+
+    async def poll_once(self, full: bool = False):
+        if self._reader is None or self._writer is None:
+            await self.connect()
+        assert self._reader and self._writer
+        req = f"{REQ_BASE} {self.ant}"
+        try:
+            await send_cmd_async(self._writer, req, framed=self.framed)
+        except Exception as e:  # noqa: BLE001
+            logger.error("(async) Senden fehlgeschlagen: %s", e)
+            raise RFUConnectionError(str(e)) from e
+        try:
+            line = await recv_answer_async(self._reader, timeout=self.timeout, framed=self.framed)
+        except Exception as e:  # noqa: BLE001
+            logger.error("(async) Empfang fehlgeschlagen: %s", e)
+            raise RFUConnectionError(str(e)) from e
+        if line is None:
+            logger.debug("(async) Keine Antwort / Timeout")
+            return []
+        logger.debug("(async) RAW Antwort: %s", line)
+        _, tag_list = parse_line(line)
+        if full:
+            return [
+                {
+                    'epc': t['epc'],
+                    'pc': t['pc'],
+                    'antenna': t['antenna'],
+                    'rssi_dbm': t['rssi_dbm'],
+                    'power_dbm': t['power_dbm'],
+                    'raw_epc_pc': t['raw_epc_pc'],
+                    'rssi_raw': t['rssi_raw'],
+                    'power_raw': t['power_raw']
+                }
+                for t in tag_list
+            ]
+        return [t['epc'] for t in tag_list]
+
+    async def poll_loop(self, interval: float = 1.0, limit: int = 0, full: bool = False) -> AsyncGenerator[List[Any], None]:
+        poll = 0
+        try:
+            while limit == 0 or poll < limit:
+                poll += 1
+                try:
+                    yield await self.poll_once(full=full)
+                except RFUInventoryError:
+                    # Fehler weiterreichen nach Logging
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("(async) Unbekannter Fehler im Poll")
+                    raise RFUInventoryError(str(e)) from e
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info("(async) Poll Loop abgebrochen")
+            raise
+
+    async def poll_once_safe(self, full: bool = False) -> Tuple[List[Any], Optional[Exception]]:
+        try:
+            return await self.poll_once(full=full), None
+        except Exception as e:  # noqa: BLE001
+            logger.exception("(async) poll_once Fehler")
+            return [], e
 
 
 def build_arg_parser():
@@ -251,10 +532,21 @@ def build_arg_parser():
     p.add_argument('--connect-timeout', type=float, default=2.0)
     p.add_argument('--limit', type=int, default=0, help='Anzahl Polls (0=unbegrenzt)')
     p.add_argument('--full', action='store_true', help='Gibt vollständige Tag-Objekte (inkl. RSSI/Power) statt nur EPCs aus')
+    p.add_argument('--log-level', default='INFO', help='Logging Level (DEBUG, INFO, WARNING, ERROR)')
     return p
+
+
+def setup_logging(level: str):
+    lvl = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=lvl,
+        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
 
 
 if __name__ == '__main__':
     parser = build_arg_parser()
     args = parser.parse_args()
+    setup_logging(args.log_level)
     run(args)

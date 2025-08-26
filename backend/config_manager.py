@@ -10,7 +10,14 @@ DEFAULT_CONFIG = {
     "OPC_UA_ENABLED": True,
     "RFID_OPC_ENABLED": False,
     "RFID_OPC_SERVER_URL": "opc.tcp://10.11.36.216:4840",
-    "RFID_OPC_NODE_ID": "ns=4;i=6023"
+    "RFID_OPC_NODE_ID": "ns=4;i=6023",
+    # New: Direct RFID Inventory (socket) config
+    "RFID_INVENTORY_ENABLED": False,
+    "RFID_READER_IP": "",
+    "RFID_READER_PORT": 2111,
+    "RFID_READER_ANT": "F",
+    "RFID_CURRENT_RETENTION_SEC": 10,
+    "RFID_INVENTORY_INTERVAL_SEC": 1
 }
 
 def load_config() -> Dict[str, Any]:
@@ -22,7 +29,14 @@ def load_config() -> Dict[str, Any]:
         "OPC_UA_ENABLED": os.environ.get("OPC_UA_ENABLED"),
         "RFID_OPC_ENABLED": os.environ.get("RFID_OPC_ENABLED"),
         "RFID_OPC_SERVER_URL": os.environ.get("RFID_OPC_SERVER_URL"),
-        "RFID_OPC_NODE_ID": os.environ.get("RFID_OPC_NODE_ID")
+        "RFID_OPC_NODE_ID": os.environ.get("RFID_OPC_NODE_ID"),
+        # Direct RFID inventory env overrides
+        "RFID_INVENTORY_ENABLED": os.environ.get("RFID_INVENTORY_ENABLED"),
+        "RFID_READER_IP": os.environ.get("RFID_READER_IP"),
+        "RFID_READER_PORT": os.environ.get("RFID_READER_PORT"),
+        "RFID_READER_ANT": os.environ.get("RFID_READER_ANT"),
+        "RFID_CURRENT_RETENTION_SEC": os.environ.get("RFID_CURRENT_RETENTION_SEC"),
+    "RFID_INVENTORY_INTERVAL_SEC": os.environ.get("RFID_INVENTORY_INTERVAL_SEC"),
     }
     for key, value in env_map.items():
         if value is not None:

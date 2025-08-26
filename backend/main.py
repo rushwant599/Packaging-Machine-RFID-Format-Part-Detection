@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
+import asyncio
+import time
 import os
 import logging
 from pathlib import Path
@@ -12,6 +14,7 @@ import json
 
 # Local modules
 from opc_client import OPCUAManager
+from rfu_ivsingle_inventory import AsyncRFUInventoryClient, RFUInventoryError
 from format_parser import FormatDataManager
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
@@ -60,6 +63,15 @@ rfid_opc_manager = None
 format_manager = None
 assignment_manager = None
 
+# Live RFID Inventory (Direct Socket) State
+async_rfu_client: AsyncRFUInventoryClient | None = None
+_rfid_poll_task = None
+_current_rfid_full: list[dict] = []  # letzter vollständiger Satz Tags (detailliert)
+_current_rfid_epcs: list[str] = []   # nur EPC Strings
+_last_rfid_timestamp: float | None = None
+_current_rfid_seen: dict[str, dict] = {}  # per EPC: aggregation with first_seen, last_seen, read_count, last_rssi, last_power, antenna
+_rfid_retention_sec: float = 10.0
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -105,7 +117,7 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, rfid_opc_manager, format_manager, assignment_manager
+    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp
     
     # Startup
     logger.info("Starting RFID Parts Backend...")
@@ -154,6 +166,89 @@ async def lifespan(app: FastAPI):
         logger.info("RFID OPC UA client auto-started from config.")
     
     
+    # Direct RFID Inventory (Socket) falls aktiviert
+    if config.get("RFID_INVENTORY_ENABLED", False) and config.get("RFID_READER_IP"):
+        reader_ip = config.get("RFID_READER_IP")
+        reader_port = int(config.get("RFID_READER_PORT", 2111))
+        reader_ant = config.get("RFID_READER_ANT", "F")
+        interval = float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1))
+        retention = float(config.get("RFID_CURRENT_RETENTION_SEC", 10))
+        globals()["_rfid_retention_sec"] = retention
+        async_rfu_client = AsyncRFUInventoryClient(ip=reader_ip, port=reader_port, ant=reader_ant)
+
+        async def _poll_loop():
+            nonlocal interval, retention
+            import asyncio as _a
+            logger.info("Start direct RFID inventory polling ip=%s port=%s ant=%s interval=%.2fs", reader_ip, reader_port, reader_ant, interval)
+            try:
+                async with async_rfu_client:
+                    async for result in async_rfu_client.poll_loop(interval=interval, limit=0, full=True):
+                        now = time.time()
+                        # Update aggregation + persistence
+                        # result: list of tag dicts containing at least 'epc', maybe 'rssi_dbm', 'power_dbm', 'antenna'
+                        for tag in result:
+                            epc = tag.get("epc")
+                            if not epc:
+                                continue
+                            seen_entry = _current_rfid_seen.get(epc)
+                            if seen_entry is None:
+                                _current_rfid_seen[epc] = {
+                                    "epc": epc,
+                                    "first_seen": now,
+                                    "last_seen": now,
+                                    "read_count": 1,
+                                    "antenna": tag.get("antenna"),
+                                    "last_rssi": tag.get("rssi_dbm"),
+                                    "last_power": tag.get("power_dbm")
+                                }
+                                # Persist first time
+                                if assignment_manager:
+                                    await assignment_manager.record_rfid_tag(epc)
+                            else:
+                                seen_entry["last_seen"] = now
+                                seen_entry["read_count"] += 1
+                                if tag.get("rssi_dbm") is not None:
+                                    seen_entry["last_rssi"] = tag.get("rssi_dbm")
+                                if tag.get("power_dbm") is not None:
+                                    seen_entry["last_power"] = tag.get("power_dbm")
+                        # Retention filter + prune
+                        cutoff = now - retention
+                        to_delete = [k for k, v in _current_rfid_seen.items() if v["last_seen"] < cutoff]
+                        for k in to_delete:
+                            _current_rfid_seen.pop(k, None)
+                        # Build current live lists from retained entries
+                        live_entries = list(_current_rfid_seen.values())
+                        _current_rfid_full = [
+                            {
+                                "epc": e["epc"],
+                                "first_seen": e["first_seen"],
+                                "last_seen": e["last_seen"],
+                                "read_count": e["read_count"],
+                                "antenna": e.get("antenna"),
+                                "last_rssi": e.get("last_rssi"),
+                                "last_power": e.get("last_power")
+                            } for e in live_entries
+                        ]
+                        _current_rfid_epcs = [e["epc"] for e in live_entries]
+                        _last_rfid_timestamp = now
+                        if _current_rfid_epcs:
+                            await websocket_manager.broadcast_value_change({
+                                "type": "rfid_inventory",
+                                "tags": _current_rfid_epcs,
+                                "count": len(_current_rfid_epcs),
+                                "timestamp": now
+                            })
+            except RFUInventoryError as e:
+                logger.error("RFID inventory polling stopped (protocol error): %s", e)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("RFID inventory polling crashed: %s", e)
+            finally:
+                logger.info("RFID inventory polling task ended")
+
+        _rfid_poll_task = asyncio.create_task(_poll_loop())
+    else:
+        logger.info("Direct RFID inventory disabled or missing IP in config.")
+
     # Initialize format data manager
     cache_dir = Path(__file__).parent.parent
     html_cache_path = cache_dir / "customer-html-cache.html"
@@ -165,6 +260,13 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down RFID Parts Backend...")
     if opc_manager:
         await opc_manager.stop_monitoring()
+    # Stop direct RFID inventory
+    if _rfid_poll_task:
+        _rfid_poll_task.cancel()
+        try:
+            await _rfid_poll_task
+        except Exception:  # noqa: BLE001
+            pass
     if rfid_opc_manager:
         await rfid_opc_manager.stop_monitoring()
     if assignment_manager:
@@ -232,6 +334,13 @@ class ConfigUpdate(BaseModel):
     RFID_OPC_ENABLED: Optional[bool] = None
     RFID_OPC_SERVER_URL: Optional[str] = None 
     RFID_OPC_NODE_ID: Optional[str] = None 
+    # Direct RFID inventory (socket) config
+    RFID_INVENTORY_ENABLED: Optional[bool] = None
+    RFID_READER_IP: Optional[str] = None
+    RFID_READER_PORT: Optional[int] = None
+    RFID_READER_ANT: Optional[str] = None
+    RFID_CURRENT_RETENTION_SEC: Optional[int] = None
+    RFID_INVENTORY_INTERVAL_SEC: Optional[int] = None
 
 @app.get("/")
 async def root():
@@ -350,6 +459,7 @@ async def process_rfid_scan(data: RFIDData):
         }
     }
 
+'''
 @app.get("/api/rfid/tags")
 async def get_rfid_tags():
     """Get list of all RFID tags"""
@@ -370,6 +480,7 @@ async def get_rfid_tags():
             "last_scanned": "2025-06-26T11:00:00Z"
         }
     ]
+'''
 
 # Format Data Endpoints (using FormatDataManager)
 @app.get("/api/format-data")
@@ -507,20 +618,41 @@ async def get_rfid_opc_ua_value():
     }
 
 @app.get("/api/rfid-tags")
-async def list_rfid_tags():
-    """Return list of known RFID tag IDs with metadata."""
-    if not assignment_manager:
-        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
-    tags = await assignment_manager.list_rfid_tags()
-    return {"success": True, "tags": tags, "count": len(tags)}
+async def list_persisted_rfid_tags():
+    """Alle persistierten RFID Tags aus der Datenbank.
 
-@app.get("/api/rfid-tag-ids")
-async def list_rfid_tag_ids():
-    """Return only tag_id strings for dropdown usage."""
+    Gibt Metadaten (first_seen, last_seen, read_count) zurück; keine Live-RSSI Werte.
+    """
     if not assignment_manager:
-        raise HTTPException(status_code=500, detail="Assignment manager not initialized")
-    tag_ids = await assignment_manager.get_rfid_tag_ids()
-    return {"success": True, "tagIds": tag_ids}
+        raise HTTPException(status_code=503, detail="Assignment manager not available")
+    tags = await assignment_manager.list_rfid_tags()
+    return {"success": True, "count": len(tags), "tags": tags}
+
+@app.get("/api/current-rfid-tag-ids")
+async def list_current_rfid_tag_ids():
+    """Aktuell lesbare Tag-IDs basierend auf Retention-Window.
+
+    Nutzt den direkten Inventory-Puffer. Es erfolgt kein Fallback auf Datenbank,
+    weil nur die gerade (innerhalb der Retention) gesehenen Tags interessant sind.
+    """
+    global _current_rfid_epcs, _last_rfid_timestamp, _rfid_retention_sec
+    # Optional: Soft refresh retention filtering (prune by timestamp now)
+    now = time.time()
+    cutoff = now - _rfid_retention_sec
+    # Prune global seen dict again (in case Poll loop paused)
+    for epc, meta in list(_current_rfid_seen.items()):
+        if meta["last_seen"] < cutoff:
+            _current_rfid_seen.pop(epc, None)
+    _current_rfid_epcs = [e for e in _current_rfid_seen.keys()]
+    if not _current_rfid_epcs:
+        return {"success": True, "tagIds": [], "count": 0, "timestamp": _last_rfid_timestamp, "retention_sec": _rfid_retention_sec}
+    return {
+        "success": True,
+        "tagIds": _current_rfid_epcs,
+        "count": len(_current_rfid_epcs),
+        "timestamp": _last_rfid_timestamp,
+        "retention_sec": _rfid_retention_sec
+    }
 
 @app.post("/api/opc-ua/refresh")
 async def refresh_opc_ua_value():
@@ -721,14 +853,17 @@ async def update_config(update: ConfigUpdate):
     rfid_opc_config_changed = False
     
     # Update all config values
-    for key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED", 
-                "RFID_OPC_ENABLED", "RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID"]:
+    for key in [
+        "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
+        "RFID_OPC_ENABLED", "RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID",
+        "RFID_INVENTORY_ENABLED", "RFID_READER_IP", "RFID_READER_PORT", "RFID_READER_ANT",
+        "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC"
+    ]:
         value = getattr(update, key)
         if value is not None:
             logger.info(f"Config UPDATE: {key} = {value}")
             config[key] = value
             changed = True
-            
             if key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED"]:
                 opc_ua_config_changed = True
             elif key in ["RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID", "RFID_OPC_ENABLED"]:
@@ -741,12 +876,119 @@ async def update_config(update: ConfigUpdate):
         # Handle OPC UA changes
         if opc_ua_config_changed:
             await handle_opc_ua_config_change(config, opc_ua_enabled_before, opc_ua_enabled_after)
-        
         # Handle RFID OPC changes
         if rfid_opc_config_changed:
             await handle_rfid_opc_config_change(config, rfid_opc_enabled_before, rfid_opc_enabled_after)
+        # Direct RFID inventory
+        await handle_direct_rfid_inventory_config_change(config)
     
     return config
+
+async def handle_direct_rfid_inventory_config_change(config):
+    global async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen, _rfid_retention_sec
+    enabled = config.get("RFID_INVENTORY_ENABLED", False) and bool(config.get("RFID_READER_IP"))
+    desired_ip = config.get("RFID_READER_IP", "")
+    desired_port = int(config.get("RFID_READER_PORT", 2111))
+    desired_ant = config.get("RFID_READER_ANT", "F")
+    interval = float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1))
+    retention = float(config.get("RFID_CURRENT_RETENTION_SEC", 10))
+    _rfid_retention_sec = retention
+
+    restart = False
+    if _rfid_poll_task and _rfid_poll_task.done():
+        restart = True
+    if async_rfu_client and enabled:
+        if async_rfu_client.ip != desired_ip or async_rfu_client.port != desired_port or async_rfu_client.ant != desired_ant:
+            restart = True
+
+    if not enabled:
+        if _rfid_poll_task:
+            _rfid_poll_task.cancel()
+            try:
+                await _rfid_poll_task
+            except Exception:  # noqa: BLE001
+                pass
+            _rfid_poll_task = None
+        async_rfu_client = None
+    _current_rfid_full = []
+    _current_rfid_epcs = []
+    _current_rfid_seen = {}
+    _last_rfid_timestamp = None
+    logger.info("Direct RFID inventory stopped (disabled)")
+    return
+
+    if enabled and (async_rfu_client is None or restart or _rfid_poll_task is None):
+        if _rfid_poll_task:
+            _rfid_poll_task.cancel()
+            try:
+                await _rfid_poll_task
+            except Exception:  # noqa: BLE001
+                pass
+        async_rfu_client = AsyncRFUInventoryClient(ip=desired_ip, port=desired_port, ant=desired_ant)
+        logger.info("(Re)starting direct RFID inventory ip=%s port=%s ant=%s interval=%.2fs", desired_ip, desired_port, desired_ant, interval)
+
+        async def _poll_loop():
+            global _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen
+            try:
+                async with async_rfu_client:
+                    async for result in async_rfu_client.poll_loop(interval=interval, limit=0, full=True):
+                        now = time.time()
+                        for tag in result:
+                            epc = tag.get("epc")
+                            if not epc:
+                                continue
+                            seen_entry = _current_rfid_seen.get(epc)
+                            if seen_entry is None:
+                                _current_rfid_seen[epc] = {
+                                    "epc": epc,
+                                    "first_seen": now,
+                                    "last_seen": now,
+                                    "read_count": 1,
+                                    "antenna": tag.get("antenna"),
+                                    "last_rssi": tag.get("rssi_dbm"),
+                                    "last_power": tag.get("power_dbm")
+                                }
+                                if assignment_manager:
+                                    await assignment_manager.record_rfid_tag(epc)
+                            else:
+                                seen_entry["last_seen"] = now
+                                seen_entry["read_count"] += 1
+                                if tag.get("rssi_dbm") is not None:
+                                    seen_entry["last_rssi"] = tag.get("rssi_dbm")
+                                if tag.get("power_dbm") is not None:
+                                    seen_entry["last_power"] = tag.get("power_dbm")
+                        # Retention prune
+                        cutoff = now - _rfid_retention_sec
+                        for epc_key, meta in list(_current_rfid_seen.items()):
+                            if meta["last_seen"] < cutoff:
+                                _current_rfid_seen.pop(epc_key, None)
+                        live_entries = list(_current_rfid_seen.values())
+                        _current_rfid_full = [
+                            {
+                                "epc": e["epc"],
+                                "first_seen": e["first_seen"],
+                                "last_seen": e["last_seen"],
+                                "read_count": e["read_count"],
+                                "antenna": e.get("antenna"),
+                                "last_rssi": e.get("last_rssi"),
+                                "last_power": e.get("last_power")
+                            } for e in live_entries
+                        ]
+                        _current_rfid_epcs = [e["epc"] for e in live_entries]
+                        _last_rfid_timestamp = now
+                        if _current_rfid_epcs:
+                            await websocket_manager.broadcast_value_change({
+                                "type": "rfid_inventory",
+                                "tags": _current_rfid_epcs,
+                                "count": len(_current_rfid_epcs),
+                                "timestamp": now
+                            })
+            except Exception as e:  # noqa: BLE001
+                logger.exception("Direct RFID inventory poll loop error: %s", e)
+            finally:
+                logger.info("Direct RFID inventory poll loop ended")
+
+        _rfid_poll_task = asyncio.create_task(_poll_loop())
 
 async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
     global rfid_opc_manager
@@ -774,33 +1016,27 @@ async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
             await rfid_opc_manager.start_monitoring()
             logger.info("RFID OPC client enabled and started live.")
         else:
-            # Disable RFID OPC client
-            if rfid_opc_manager:
-                await rfid_opc_manager.stop_monitoring()
-                rfid_opc_manager = None
-                logger.info("RFID OPC client stopped and disabled live.")
-    elif rfid_opc_manager and enabled_after:
-        # Restart with new config
-        await rfid_opc_manager.stop_monitoring()
-        from opc_client import OPCUAManager
-        RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
-        RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
-        rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
-        
-        async def rfid_value_change_callback(new_value):
-            tag_val = new_value.get("value")
-            if tag_val and assignment_manager:
-                await assignment_manager.record_rfid_tag(str(tag_val))
-            rfid_data = {
-                "type": "rfid_scan",
-                "tag_id": tag_val,
-                "timestamp": new_value.get("timestamp")
-            }
-            await websocket_manager.broadcast_value_change(rfid_data)
-        
-        rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
-        await rfid_opc_manager.start_monitoring()
-        logger.info("RFID OPC client restarted live with new config.")
+            # Restart with new config
+            await rfid_opc_manager.stop_monitoring()
+            from opc_client import OPCUAManager
+            RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
+            RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
+            rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
+
+            async def rfid_value_change_callback(new_value):
+                tag_val = new_value.get("value")
+                if tag_val and assignment_manager:
+                    await assignment_manager.record_rfid_tag(str(tag_val))
+                rfid_data = {
+                    "type": "rfid_scan",
+                    "tag_id": tag_val,
+                    "timestamp": new_value.get("timestamp")
+                }
+                await websocket_manager.broadcast_value_change(rfid_data)
+
+            rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
+            await rfid_opc_manager.start_monitoring()
+            logger.info("RFID OPC client restarted live with new config.")
 
 async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
     global opc_manager

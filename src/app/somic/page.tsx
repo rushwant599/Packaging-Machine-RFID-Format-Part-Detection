@@ -10,6 +10,12 @@ const defaultConfig = {
   RFID_OPC_NODE_ID: "",
   OPC_UA_ENABLED: false,
   RFID_OPC_ENABLED: false,
+  RFID_INVENTORY_ENABLED: false,
+  RFID_READER_IP: "",
+  RFID_READER_PORT: 2111,
+  RFID_READER_ANT: "F",
+  RFID_CURRENT_RETENTION_SEC: 10,
+  RFID_INVENTORY_INTERVAL_SEC: 1,
 };
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
@@ -24,6 +30,7 @@ export default function SomicPage() {
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [openSection, setOpenSection] = useState<string | null>(null);
   const api = useAPI();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +45,12 @@ export default function SomicPage() {
           RFID_OPC_NODE_ID: data.RFID_OPC_NODE_ID || "",
           OPC_UA_ENABLED: !!data.OPC_UA_ENABLED,
           RFID_OPC_ENABLED: !!data.RFID_OPC_ENABLED,
+          RFID_INVENTORY_ENABLED: !!data.RFID_INVENTORY_ENABLED,
+          RFID_READER_IP: data.RFID_READER_IP || "",
+            RFID_READER_PORT: data.RFID_READER_PORT ?? 2111,
+            RFID_READER_ANT: data.RFID_READER_ANT || "F",
+            RFID_CURRENT_RETENTION_SEC: data.RFID_CURRENT_RETENTION_SEC ?? 10,
+            RFID_INVENTORY_INTERVAL_SEC: data.RFID_INVENTORY_INTERVAL_SEC ?? 1,
         });
         setLoading(false);
       })
@@ -72,11 +85,12 @@ export default function SomicPage() {
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked !== undefined ? (e.target as HTMLInputElement).checked : undefined;
     setConfig((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: type === "checkbox" ? checked : (type === 'number' ? Number(value) : value),
     }));
   };
 
@@ -201,54 +215,6 @@ export default function SomicPage() {
                     }}
                     className="space-y-4"
                   >
-                    <div>
-                      <label className="block text-sm font-medium text-black">
-                        OPC UA Server URL
-                      </label>
-                      <input
-                        type="text"
-                        name="OPC_UA_SERVER_URL"
-                        value={config.OPC_UA_SERVER_URL}
-                        onChange={handleChange}
-                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-black">
-                        OPC UA Node ID
-                      </label>
-                      <input
-                        type="text"
-                        name="OPC_UA_NODE_ID"
-                        value={config.OPC_UA_NODE_ID}
-                        onChange={handleChange}
-                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-black">
-                        RFID Server URL
-                      </label>
-                      <input
-                        type="text"
-                        name="RFID_OPC_SERVER_URL"
-                        value={config.RFID_OPC_SERVER_URL}
-                        onChange={handleChange}
-                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-black">
-                        RFID OPC Node ID
-                      </label>
-                      <input
-                        type="text"
-                        name="RFID_OPC_NODE_ID"
-                        value={config.RFID_OPC_NODE_ID}
-                        onChange={handleChange}
-                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black"
-                      />
-                    </div>
                     <div className="flex items-center">
                       <input
                         type="checkbox"
@@ -272,6 +238,100 @@ export default function SomicPage() {
                       <label className="ml-2 block text-sm text-black">
                         Enable RFID OPC
                       </label>
+                    </div>
+                    <hr className="my-2" />
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="RFID_INVENTORY_ENABLED"
+                        checked={config.RFID_INVENTORY_ENABLED}
+                        onChange={handleChange}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label className="ml-2 block text-sm text-black">
+                        Enable Direct RFID Inventory
+                      </label>
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setOpenSection(openSection === 'opcua' ? null : 'opcua')}
+                        className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
+                      >
+                        <span>OPC UA Settings</span>
+                        <span>{openSection === 'opcua' ? '−' : '+'}</span>
+                      </button>
+                      {openSection === 'opcua' && (
+                        <div className="mt-2 space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-black">OPC UA Server URL</label>
+                            <input type="text" name="OPC_UA_SERVER_URL" value={config.OPC_UA_SERVER_URL} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">OPC UA Node ID</label>
+                            <input type="text" name="OPC_UA_NODE_ID" value={config.OPC_UA_NODE_ID} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setOpenSection(openSection === 'rfidopc' ? null : 'rfidopc')}
+                        className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
+                      >
+                        <span>RFID OPC Settings</span>
+                        <span>{openSection === 'rfidopc' ? '−' : '+'}</span>
+                      </button>
+                      {openSection === 'rfidopc' && (
+                        <div className="mt-2 space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-black">RFID Server URL</label>
+                            <input type="text" name="RFID_OPC_SERVER_URL" value={config.RFID_OPC_SERVER_URL} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">RFID OPC Node ID</label>
+                            <input type="text" name="RFID_OPC_NODE_ID" value={config.RFID_OPC_NODE_ID} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => setOpenSection(openSection === 'directrfid' ? null : 'directrfid')}
+                        className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
+                      >
+                        <span>Direct RFID Inventory Settings</span>
+                        <span>{openSection === 'directrfid' ? '−' : '+'}</span>
+                      </button>
+                      {openSection === 'directrfid' && (
+                        <div className="mt-2 space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-black">RFID Reader IP</label>
+                            <input type="text" name="RFID_READER_IP" value={config.RFID_READER_IP} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">RFID Reader Port</label>
+                            <select name="RFID_READER_PORT" value={config.RFID_READER_PORT} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black">
+                              <option value={2111}>2111 (CoLa-A ASCII)</option>
+                              <option value={2112}>2112 (CoLa-B Binary)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">RFID Reader Ant Mask</label>
+                            <input type="text" name="RFID_READER_ANT" value={config.RFID_READER_ANT} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">Current RFID Retention (s)</label>
+                            <input type="number" name="RFID_CURRENT_RETENTION_SEC" value={config.RFID_CURRENT_RETENTION_SEC} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-black">Inventory Interval (s)</label>
+                            <input type="number" name="RFID_INVENTORY_INTERVAL_SEC" value={(config as any).RFID_INVENTORY_INTERVAL_SEC || 1} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <button

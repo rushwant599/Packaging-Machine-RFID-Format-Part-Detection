@@ -4,6 +4,7 @@ data/config.json
 html-cache/
 dockertest/
 config.json
+backend/test.txt    
 # Dependencies
 /node_modules
 /.pnp
@@ -125,3 +126,4 @@ coverage/
 *.crt
 *.pem
 certificates/
+backend/test.py

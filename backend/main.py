@@ -654,6 +654,41 @@ async def list_current_rfid_tag_ids():
         "retention_sec": _rfid_retention_sec
     }
 
+# Alias-Endpunkt damit Aufruf /api/rfid-tag-ids (ohne "current-") funktioniert
+@app.get("/api/rfid-tag-ids")
+async def list_current_rfid_tag_ids_alias():
+    """Nur die persistierten Tag-IDs (gleiche Quelle wie /api/rfid-tags, aber ohne Metadaten).
+
+    Hintergrund Wunsch: statt des Live-Retention Puffers ("current") sollen hier ausschließlich
+    die dauerhaft gespeicherten Tags zurückkommen. Live-EPCs bleiben über /api/current-rfid-tag-ids verfügbar.
+    """
+    if not assignment_manager:
+        raise HTTPException(status_code=503, detail="Assignment manager not available")
+    tags = await assignment_manager.list_rfid_tags()  # enthält Metadaten
+    tag_ids = [t["tag_id"] for t in tags]
+    return {
+        "success": True,
+        "tagIds": tag_ids,
+        "count": len(tag_ids),
+        "source": "db"
+    }
+
+# Einfacher Status-Endpunkt für das direkte Inventory (Debug-Hilfe)
+@app.get("/api/rfid-inventory/status")
+async def rfid_inventory_status():
+    running = _rfid_poll_task is not None and not _rfid_poll_task.done()
+    return {
+        "running": running,
+        "tag_count": len(_current_rfid_epcs),
+        "last_timestamp": _last_rfid_timestamp,
+        "retention_sec": _rfid_retention_sec,
+        "reader": None if not async_rfu_client else {
+            "ip": async_rfu_client.ip,
+            "port": async_rfu_client.port,
+            "ant": async_rfu_client.ant
+        }
+    }
+
 @app.post("/api/opc-ua/refresh")
 async def refresh_opc_ua_value():
     """Force refresh of OPC UA node value"""
@@ -885,7 +920,13 @@ async def update_config(update: ConfigUpdate):
     return config
 
 async def handle_direct_rfid_inventory_config_change(config):
+    """Start/stop/restart des direkten RFID Inventory Pollings je nach Config.
+
+    BUGFIX: Vorher wurde immer sofort gestoppt wegen eines unbeabsichtigten
+    return hinter globalem Reset. Jetzt korrekt gesteuert.
+    """
     global async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen, _rfid_retention_sec
+
     enabled = config.get("RFID_INVENTORY_ENABLED", False) and bool(config.get("RFID_READER_IP"))
     desired_ip = config.get("RFID_READER_IP", "")
     desired_port = int(config.get("RFID_READER_PORT", 2111))
@@ -902,6 +943,7 @@ async def handle_direct_rfid_inventory_config_change(config):
             restart = True
 
     if not enabled:
+        # Stop & reset only when disabling
         if _rfid_poll_task:
             _rfid_poll_task.cancel()
             try:
@@ -910,13 +952,14 @@ async def handle_direct_rfid_inventory_config_change(config):
                 pass
             _rfid_poll_task = None
         async_rfu_client = None
-    _current_rfid_full = []
-    _current_rfid_epcs = []
-    _current_rfid_seen = {}
-    _last_rfid_timestamp = None
-    logger.info("Direct RFID inventory stopped (disabled)")
-    return
+        _current_rfid_full = []
+        _current_rfid_epcs = []
+        _current_rfid_seen = {}
+        _last_rfid_timestamp = None
+        logger.info("Direct RFID inventory stopped (disabled)")
+        return
 
+    # Enabled path
     if enabled and (async_rfu_client is None or restart or _rfid_poll_task is None):
         if _rfid_poll_task:
             _rfid_poll_task.cancel()
@@ -925,7 +968,7 @@ async def handle_direct_rfid_inventory_config_change(config):
             except Exception:  # noqa: BLE001
                 pass
         async_rfu_client = AsyncRFUInventoryClient(ip=desired_ip, port=desired_port, ant=desired_ant)
-        logger.info("(Re)starting direct RFID inventory ip=%s port=%s ant=%s interval=%.2fs", desired_ip, desired_port, desired_ant, interval)
+        logger.info("(Re)starting direct RFID inventory ip=%s port=%s ant=%s interval=%.2fs retention=%.1fs", desired_ip, desired_port, desired_ant, interval, retention)
 
         async def _poll_loop():
             global _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen
@@ -989,6 +1032,8 @@ async def handle_direct_rfid_inventory_config_change(config):
                 logger.info("Direct RFID inventory poll loop ended")
 
         _rfid_poll_task = asyncio.create_task(_poll_loop())
+    else:
+        logger.info("Direct RFID inventory already running (no restart needed)")
 
 async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
     global rfid_opc_manager

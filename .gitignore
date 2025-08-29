@@ -126,3 +126,4 @@ coverage/
 *.crt
 *.pem
 certificates/
+backend/test.py

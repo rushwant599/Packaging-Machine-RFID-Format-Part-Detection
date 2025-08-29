@@ -3,7 +3,22 @@ import Header from "@/components/Header";
 import { useState, useEffect, useRef } from "react";
 import { useAPI } from "@/lib/api-client";
 
-const defaultConfig = {
+type Config = {
+  OPC_UA_SERVER_URL: string;
+  OPC_UA_NODE_ID: string;
+  RFID_OPC_SERVER_URL: string;
+  RFID_OPC_NODE_ID: string;
+  OPC_UA_ENABLED: boolean;
+  RFID_OPC_ENABLED: boolean;
+  RFID_INVENTORY_ENABLED: boolean;
+  RFID_READER_IP: string;
+  RFID_READER_PORT: number;
+  RFID_READER_ANT: string;
+  RFID_CURRENT_RETENTION_SEC: number;
+  RFID_INVENTORY_INTERVAL_SEC: number;
+};
+
+const defaultConfig: Config = {
   OPC_UA_SERVER_URL: "",
   OPC_UA_NODE_ID: "",
   RFID_OPC_SERVER_URL: "",
@@ -25,7 +40,7 @@ export default function SomicPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [config, setConfig] = useState(defaultConfig);
+  const [config, setConfig] = useState<Config>(defaultConfig);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
@@ -328,7 +343,7 @@ export default function SomicPage() {
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-black">Inventory Interval (s)</label>
-                            <input type="number" name="RFID_INVENTORY_INTERVAL_SEC" value={(config as any).RFID_INVENTORY_INTERVAL_SEC || 1} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
+                            <input type="number" name="RFID_INVENTORY_INTERVAL_SEC" value={config.RFID_INVENTORY_INTERVAL_SEC} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                         </div>
                       )}

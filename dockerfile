@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 
 # Node.js Frontend Stage
-FROM node:20-alpine AS frontend-builder
+FROM node:22.19.0-alpine AS frontend-builder
 WORKDIR /app
 
 # Install Node.js dependencies

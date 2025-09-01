@@ -7,6 +7,9 @@ export default function CustomerPage() {
   const [activeFormat, setActiveFormat] = useState<string | null>(null);
   const [formatLoading, setFormatLoading] = useState<boolean>(true);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'error'>('connecting');
+  // Nur die IDs des zuletzt empfangenen OPC Events
+  const [liveEventIds, setLiveEventIds] = useState<string[]>([]);
+  const HEX_EVENT_REGEX = /Ausgabe:([0-9A-Fa-f]+)/g;
 
   // Beim Laden die aktuelle Datei vom Server holen
   useEffect(() => {
@@ -81,6 +84,21 @@ export default function CustomerPage() {
               console.log("OPC UA Wertänderung empfangen:", message.data);
               setActiveFormat(message.data.value?.toString() ?? "Unbekannter Wert");
               setConnectionStatus('connected');
+              // Zusätzliche Verarbeitung für OPC Event Payload -> Hex IDs
+              if (message.data.type === 'opc_event' && typeof message.data.payload === 'string') {
+                // Extrahiere Hex IDs NUR aus diesem einen Event -> ersetzt vorherige Anzeige
+                const payload: string = message.data.payload.replace(/<STX>|<ETX>/g, '');
+                const ids: string[] = [];
+                const seen = new Set<string>();
+                let m: RegExpExecArray | null;
+                while ((m = HEX_EVENT_REGEX.exec(payload)) !== null) {
+                  const id = (m[1] || '').toUpperCase();
+                  if (!id || seen.has(id)) continue;
+                  seen.add(id);
+                  ids.push(id);
+                }
+                setLiveEventIds(ids);
+              }
             }
           } catch (parseError) {
             console.error("Fehler beim Parsen der WebSocket-Nachricht:", parseError);
@@ -131,6 +149,31 @@ export default function CustomerPage() {
           style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem" }}
         >
           <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-col gap-1" style={{ minWidth: '200px' }}>
+              <span style={{ fontSize: '0.70rem', letterSpacing: '0.05em', color: '#555', fontWeight: 600 }}>LIVE EVENT TAGS (Letztes Event)</span>
+              <div style={{
+                background: '#000',
+                border: '1px solid #333',
+                padding: '4px 6px',
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.7rem',
+                maxWidth: '260px',
+                maxHeight: '360px',
+                overflowY: 'auto',
+                lineHeight: '1.15'
+              }} title={liveEventIds.length ? `${liveEventIds.length} IDs` : 'Keine IDs'}>
+                {liveEventIds.length ? (
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {liveEventIds.map(id => (
+                      <li key={id} style={{ color: '#e0e0e0', padding: '1px 0', borderBottom: '1px solid #1d1d1d' }}>
+                        {id}
+                      </li>
+                    ))}
+                  </ul>
+                ) : <span style={{ color: '#777' }}>—</span>}
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <span style={{ color: "#666", fontWeight: "500" }}>
                 Aktives Format:

@@ -18,6 +18,8 @@ from rfu_ivsingle_inventory import AsyncRFUInventoryClient, RFUInventoryError
 from format_parser import FormatDataManager
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
+from opc_event_bytes_listener import OPCUAEventBytesListener
+from dataclasses import asdict
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -62,6 +64,12 @@ opc_manager = None
 rfid_opc_manager = None
 format_manager = None
 assignment_manager = None
+# OPC UA Event Listener (Bytes Payload)
+opc_event_listener: OPCUAEventBytesListener | None = None
+
+# Live Zeitfenster-Puffer für extrahierte Hex IDs aus Event-Bytes
+# Struktur: { hex_id: {"first_seen": ts, "last_seen": ts, "count": n} }
+_live_event_hex_ids: dict[str, dict] = {}
 
 # Live RFID Inventory (Direct Socket) State
 async_rfu_client: AsyncRFUInventoryClient | None = None
@@ -117,7 +125,7 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp
+    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, opc_event_listener
     
     # Startup
     logger.info("Starting RFID Parts Backend...")
@@ -166,6 +174,44 @@ async def lifespan(app: FastAPI):
         logger.info("RFID OPC UA client auto-started from config.")
     
     
+    # OPC UA Event Bytes Listener (neu)
+    opc_event_listener = None
+    if config.get("OPC_UA_EVENT_ENABLED", False):
+        evt_url = config.get("OPC_UA_EVENT_SERVER_URL", config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840"))
+        evt_type = config.get("OPC_UA_EVENT_TYPE", "ns=4;i=6050")
+        evt_interval = int(config.get("OPC_UA_EVENT_INTERVAL_MS", 500))
+        evt_max = int(config.get("OPC_UA_EVENT_MAX_EVENTS", 500))
+        opc_event_listener = OPCUAEventBytesListener(
+            server_url=evt_url,
+            event_type=evt_type,
+            publishing_interval_ms=evt_interval,
+            max_events=evt_max,
+        )
+
+        async def _event_cb(rec):  # rec: EventBytesRecord
+            await websocket_manager.broadcast_value_change({
+                "type": "opc_event",
+                "timestamp": rec.timestamp,
+                "payload": rec.payload
+            })
+            if rec.payload:
+                now_ts = time.time()
+                for hx in extract_hex_ids_from_payload(rec.payload):
+                    # Persist in DB
+                    if assignment_manager:
+                        await assignment_manager.record_rfid_tag(hx)
+                    # Update live window buffer
+                    meta = _live_event_hex_ids.get(hx)
+                    if meta:
+                        meta["last_seen"] = now_ts
+                        meta["count"] += 1
+                    else:
+                        _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
+
+        opc_event_listener.add_callback(_event_cb)
+        await opc_event_listener.start()
+        logger.info("OPC UA Event Listener gestartet (%s / %s)", evt_url, evt_type)
+
     # Direct RFID Inventory (Socket) falls aktiviert
     if config.get("RFID_INVENTORY_ENABLED", False) and config.get("RFID_READER_IP"):
         reader_ip = config.get("RFID_READER_IP")
@@ -260,6 +306,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down RFID Parts Backend...")
     if opc_manager:
         await opc_manager.stop_monitoring()
+    if opc_event_listener:
+        await opc_event_listener.stop()
     # Stop direct RFID inventory
     if _rfid_poll_task:
         _rfid_poll_task.cancel()
@@ -341,6 +389,12 @@ class ConfigUpdate(BaseModel):
     RFID_READER_ANT: Optional[str] = None
     RFID_CURRENT_RETENTION_SEC: Optional[int] = None
     RFID_INVENTORY_INTERVAL_SEC: Optional[int] = None
+    # OPC UA Event Listener
+    OPC_UA_EVENT_ENABLED: Optional[bool] = None
+    OPC_UA_EVENT_SERVER_URL: Optional[str] = None
+    OPC_UA_EVENT_TYPE: Optional[str] = None
+    OPC_UA_EVENT_INTERVAL_MS: Optional[int] = None
+    OPC_UA_EVENT_MAX_EVENTS: Optional[int] = None
 
 @app.get("/")
 async def root():
@@ -393,6 +447,15 @@ async def health_check():
             "last_updated": None
         }
     
+    # Add Event Listener status
+    if opc_event_listener:
+        health_data["opc_event_listener"] = {
+            "enabled": True,
+            "running": opc_event_listener.is_running(),
+            "configured_type": config.get("OPC_UA_EVENT_TYPE") if (config := load_config()) else None
+        }
+    else:
+        health_data["opc_event_listener"] = {"enabled": False, "running": False}
     return health_data
 
 @app.post("/api/verify-password")
@@ -872,7 +935,7 @@ def get_config():
 
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate):
-    global opc_manager, rfid_opc_manager
+    global opc_manager, rfid_opc_manager, opc_event_listener
     config = load_config()
     changed = False
 
@@ -892,7 +955,9 @@ async def update_config(update: ConfigUpdate):
         "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
         "RFID_OPC_ENABLED", "RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID",
         "RFID_INVENTORY_ENABLED", "RFID_READER_IP", "RFID_READER_PORT", "RFID_READER_ANT",
-        "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC"
+        "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC",
+        "OPC_UA_EVENT_ENABLED", "OPC_UA_EVENT_SERVER_URL", "OPC_UA_EVENT_TYPE",
+        "OPC_UA_EVENT_INTERVAL_MS", "OPC_UA_EVENT_MAX_EVENTS"
     ]:
         value = getattr(update, key)
         if value is not None:
@@ -914,8 +979,10 @@ async def update_config(update: ConfigUpdate):
         # Handle RFID OPC changes
         if rfid_opc_config_changed:
             await handle_rfid_opc_config_change(config, rfid_opc_enabled_before, rfid_opc_enabled_after)
-        # Direct RFID inventory
-        await handle_direct_rfid_inventory_config_change(config)
+    # Direct RFID inventory
+    await handle_direct_rfid_inventory_config_change(config)
+    # Event Listener config apply
+    await handle_opc_event_listener_config_change(config)
     
     return config
 
@@ -1120,6 +1187,127 @@ async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
         opc_manager.add_value_change_callback(value_change_callback)
         await opc_manager.start_monitoring()
         logger.info("OPC UA client restarted live with new config.")
+
+
+async def handle_opc_event_listener_config_change(config):
+    """Start/Stop/Restart für OPC UA Event Bytes Listener nach Config-Update."""
+    global opc_event_listener
+    enabled = config.get("OPC_UA_EVENT_ENABLED", False)
+    if not enabled:
+        if opc_event_listener:
+            await opc_event_listener.stop()
+            opc_event_listener = None
+            logger.info("OPC UA Event Listener gestoppt (disabled)")
+        return
+    # Enabled -> prüfen ob Neustart nötig
+    evt_url = config.get("OPC_UA_EVENT_SERVER_URL", config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840"))
+    evt_type = config.get("OPC_UA_EVENT_TYPE", "ns=4;i=6050")
+    evt_interval = int(config.get("OPC_UA_EVENT_INTERVAL_MS", 500))
+    evt_max = int(config.get("OPC_UA_EVENT_MAX_EVENTS", 500))
+    restart = False
+    if opc_event_listener is None:
+        restart = True
+    else:
+        if (opc_event_listener.server_url != evt_url or
+            opc_event_listener.event_type != evt_type or
+            opc_event_listener.publishing_interval_ms != evt_interval or
+            opc_event_listener.max_events != evt_max):
+            restart = True
+    if restart:
+        if opc_event_listener:
+            await opc_event_listener.stop()
+        opc_event_listener = OPCUAEventBytesListener(
+            server_url=evt_url,
+            event_type=evt_type,
+            publishing_interval_ms=evt_interval,
+            max_events=evt_max,
+        )
+        async def _event_cb(rec):
+            await websocket_manager.broadcast_value_change({
+                "type": "opc_event",
+                "timestamp": rec.timestamp,
+                "payload": rec.payload
+            })
+            if rec.payload:
+                now_ts = time.time()
+                for hx in extract_hex_ids_from_payload(rec.payload):
+                    if assignment_manager:
+                        await assignment_manager.record_rfid_tag(hx)
+                    meta = _live_event_hex_ids.get(hx)
+                    if meta:
+                        meta["last_seen"] = now_ts
+                        meta["count"] += 1
+                    else:
+                        _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
+        opc_event_listener.add_callback(_event_cb)
+        await opc_event_listener.start()
+        logger.info("OPC UA Event Listener (re)started (%s / %s)", evt_url, evt_type)
+
+# Neue Endpunkte für Event Listener
+@app.get("/api/opc-ua/events")
+async def get_opc_ua_events(limit: int = 50):
+    if not opc_event_listener or not opc_event_listener.is_running():
+        return {"success": False, "events": [], "running": False}
+    events = opc_event_listener.get_events(limit=limit)
+    return {"success": True, "count": len(events), "events": [asdict(e) for e in events]}
+
+@app.get("/api/opc-ua/events/status")
+async def get_opc_ua_events_status():
+    cfg = load_config()
+    return {
+        "enabled": cfg.get("OPC_UA_EVENT_ENABLED", False),
+        "running": bool(opc_event_listener and opc_event_listener.is_running()),
+        "configured_type": cfg.get("OPC_UA_EVENT_TYPE"),
+        "server_url": cfg.get("OPC_UA_EVENT_SERVER_URL", cfg.get("OPC_UA_SERVER_URL")),
+        "max_events": cfg.get("OPC_UA_EVENT_MAX_EVENTS"),
+        "interval_ms": cfg.get("OPC_UA_EVENT_INTERVAL_MS")
+    }
+
+# --- Hex ID Extraktion & Live Event IDs Endpoint ---
+import re as _re
+HEX_ID_REGEX = _re.compile(r"Ausgabe:([0-9A-Fa-f]+)")
+
+def extract_hex_ids_from_payload(payload: str):
+    core = payload.replace('<STX>', '').replace('<ETX>', '')
+    found = HEX_ID_REGEX.findall(core)
+    seen = set()
+    ordered = []
+    for f in found:
+        fu = f.upper()
+        if fu not in seen:
+            seen.add(fu)
+            ordered.append(fu)
+    return ordered
+
+@app.get("/api/live-event-ids")
+async def get_live_event_ids(window_sec: float = 8.0):
+    """Liefert einzigartige Hex IDs aus den jüngsten Event-Bytes innerhalb eines Zeitfensters.
+
+    window_sec: Konfigurierbares Zeitfenster (Standard 8s). Werte <0 werden auf Default gesetzt.
+    Es wird ein eigener Zeitpuffer (_live_event_hex_ids) genutzt, der bei jedem Event aktualisiert
+    und hier bereinigt wird. So muss nicht der gesamte Event-Ring erneut geparst werden.
+    """
+    if window_sec <= 0:
+        window_sec = 8.0
+    running = bool(opc_event_listener and opc_event_listener.is_running())
+    now_ts = time.time()
+    cutoff = now_ts - window_sec
+    # Prune alte Einträge
+    to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
+    for k in to_delete:
+        _live_event_hex_ids.pop(k, None)
+    # Ergebnis sammeln
+    ids = list(_live_event_hex_ids.keys())
+    # Optional sort: neueste zuerst
+    ids.sort(key=lambda x: _live_event_hex_ids[x]["last_seen"], reverse=True)
+    return {
+        "success": True,
+        "running": running,
+        "count": len(ids),
+        "window_sec": window_sec,
+        "ids": ids,
+        "meta": {k: _live_event_hex_ids[k] for k in ids}
+    }
 
 if __name__ == "__main__":
     import uvicorn

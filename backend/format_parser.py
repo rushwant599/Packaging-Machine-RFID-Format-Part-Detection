@@ -168,8 +168,38 @@ class FormatDataParser:
         """Collect raw and combined (valueIndex + part) sets and per-format mappings.
         Returns dict with keys: rawParts, combinedParts, rawPerFormat, combinedPerFormat.
         """
-        raw_parts_set: set[str] = set()
-        combined_parts_set: set[str] = set()
+        def compute_order_key(idx: int, visible_idx: Optional[str]) -> int:
+            if visible_idx and visible_idx.isdigit():
+                return int(visible_idx)
+            return 10_000_000 + idx
+
+        def extract_item(idx: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            part = (item.get("formatPart") or "").strip()
+            if not part or re.match(r'^-+$', part):
+                return None
+            visible_idx = value_index_map.get(idx) if idx > 0 else None
+            if part == "FTL." and not visible_idx:
+                return None
+            order_key = compute_order_key(idx, visible_idx)
+            combined = f"{visible_idx} {part}" if visible_idx else part
+            if visible_idx and 'valueIndex' not in item:
+                item['valueIndex'] = visible_idx
+            if 'combinedPart' not in item:
+                item['combinedPart'] = combined
+            return {'part': part, 'combined': combined, 'order': order_key}
+
+        def process_format(data_items: List[Any]) -> List[Dict[str, Any]]:
+            processed: List[Dict[str, Any]] = []
+            for idx, item in enumerate(data_items):
+                if not isinstance(item, dict):
+                    continue
+                info = extract_item(idx, item)
+                if info:
+                    processed.append(info)
+            return processed
+
+        raw_parts_global: set[str] = set()
+        combined_index_map: Dict[str, int] = {}
         raw_per_format: Dict[str, List[str]] = {}
         combined_per_format: Dict[str, List[str]] = {}
 
@@ -177,42 +207,26 @@ class FormatDataParser:
             data_items = fmt.get("data", [])
             if not isinstance(data_items, list):
                 continue
-            raw_local: set[str] = set()
-            combined_local: set[str] = set()
-            for idx, item in enumerate(data_items):
-                part = (item.get("formatPart") or "").strip()
-                if not part:
-                    continue
-                if re.match(r'^-+$', part):  # skip only dashes placeholders
-                    continue
-                # Determine visible index (skip header at idx 0) - map uses idx (1-based alignment from earlier logic)
-                visible_idx = None
-                if idx > 0:
-                    visible_idx = value_index_map.get(idx)
-                # Skip naked header marker 'FTL.' (first entry) without visible index
-                if part == "FTL." and not visible_idx:
-                    continue
-                # Build combined token
-                if visible_idx:
-                    combined = f"{visible_idx} {part}"  # space separator
-                else:
-                    combined = part
-                # store
-                raw_parts_set.add(part)
-                combined_parts_set.add(combined)
-                raw_local.add(part)
-                combined_local.add(combined)
-                # Enrich original item for downstream use
-                if visible_idx and 'valueIndex' not in item:
-                    item['valueIndex'] = visible_idx
-                if 'combinedPart' not in item:
-                    item['combinedPart'] = combined
-            raw_per_format[format_name] = sorted(raw_local)
-            combined_per_format[format_name] = sorted(combined_local)
+            processed_items = process_format(data_items)
+            local_raw: set[str] = set()
+            local_combined_map: Dict[str, int] = {}
+            for info in processed_items:
+                p = info['part']
+                c = info['combined']
+                o = info['order']
+                raw_parts_global.add(p)
+                local_raw.add(p)
+                if c not in combined_index_map or o < combined_index_map[c]:
+                    combined_index_map[c] = o
+                if c not in local_combined_map or o < local_combined_map[c]:
+                    local_combined_map[c] = o
+            raw_per_format[format_name] = sorted(local_raw)
+            combined_per_format[format_name] = [c for c, _ in sorted(local_combined_map.items(), key=lambda kv: (kv[1], kv[0]))]
 
+        combined_parts_ordered = [c for c, _ in sorted(combined_index_map.items(), key=lambda kv: (kv[1], kv[0]))]
         return {
-            'rawParts': sorted(raw_parts_set),
-            'combinedParts': sorted(combined_parts_set),
+            'rawParts': sorted(raw_parts_global),
+            'combinedParts': combined_parts_ordered,
             'rawPerFormat': raw_per_format,
             'combinedPerFormat': combined_per_format
         }

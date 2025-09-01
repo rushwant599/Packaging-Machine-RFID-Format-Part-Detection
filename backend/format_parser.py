@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+NO_HTML_FILE_MESSAGE = "No HTML file uploaded"
+
 
 class FormatDataParser:
     """Parser for extracting format data from HTML files"""
@@ -39,12 +41,21 @@ class FormatDataParser:
             formats_data = self._parse_formats_json(formats_json_str)
             if not formats_data:
                 return {}
-            
+
+            # Build mapping: data index (vN) -> visible value index (Nr. column)
+            value_index_map = self._build_value_index_map(soup)
+
+            # Collect raw + combined parts
+            collected = self._collect_all_parts(formats_data, value_index_map)
+
             # Build complete format data structure
             format_data = {
                 'formats': formats_data,
-                'formatParts': self._collect_format_parts(formats_data),
-                'formatPartsPerFormat': self._collect_format_parts_per_format(formats_data)
+                'formatParts': collected['combinedParts'],  # default: combined (valueIndex + part)
+                'formatPartsRaw': collected['rawParts'],
+                'formatPartsPerFormat': collected['rawPerFormat'],
+                'formatPartsPerFormatWithIndex': collected['combinedPerFormat'],
+                'valueIndexMap': value_index_map
             }
             
             logger.info(f"Successfully parsed {len(formats_data)} formats with {len(format_data['formatParts'])} unique parts")
@@ -126,57 +137,85 @@ class FormatDataParser:
             logger.error(f"JSON parsing error: {e}")
             raise ValueError(f"Fehler beim Parsen von JSON: {e}")
     
-    def _collect_format_parts(self, formats_data: Dict[str, Any]) -> List[str]:
-        """Collect all unique format parts"""
-        format_parts_set = set()
-        
+    def _build_value_index_map(self, soup: BeautifulSoup) -> Dict[int, str]:
+        """Extract mapping from vN ids to the displayed value index (Nr.).
+        Returns dict: data_position (int) -> displayed_index (str).
+        data_position corresponds to the N of id='vN' (1-based).
+        """
+        mapping: Dict[int, str] = {}
+        # Each row may contain a td with id vN and a first td with class 'value index'
+        for value_cell in soup.select('td[id^="v"], td[id^="v"]'):  # redundancy harmless
+            vid = value_cell.get('id')
+            if not vid:
+                continue
+            m = re.match(r'^v(\d+)$', vid)
+            if not m:
+                continue
+            data_pos = int(m.group(1))  # corresponds to index in formats_data['data'] (1-based, after header)
+            row = value_cell.parent
+            if not row:
+                continue
+            # find first td with classes 'value' and 'index'
+            idx_cell = row.find('td', class_='value index')
+            if not idx_cell:
+                continue
+            displayed = (idx_cell.get_text(strip=True) or '').strip()
+            if displayed:
+                mapping[data_pos] = displayed
+        return mapping
+
+    def _collect_all_parts(self, formats_data: Dict[str, Any], value_index_map: Dict[int, str]) -> Dict[str, Any]:
+        """Collect raw and combined (valueIndex + part) sets and per-format mappings.
+        Returns dict with keys: rawParts, combinedParts, rawPerFormat, combinedPerFormat.
+        """
+        raw_parts_set: set[str] = set()
+        combined_parts_set: set[str] = set()
+        raw_per_format: Dict[str, List[str]] = {}
+        combined_per_format: Dict[str, List[str]] = {}
+
         for format_name, fmt in formats_data.items():
             data_items = fmt.get("data", [])
             if not isinstance(data_items, list):
-                logger.warning(f"Invalid data format for {format_name}")
                 continue
-            
-            for item in data_items:
-                part = item.get("formatPart")
+            raw_local: set[str] = set()
+            combined_local: set[str] = set()
+            for idx, item in enumerate(data_items):
+                part = (item.get("formatPart") or "").strip()
                 if not part:
                     continue
-                
-                part = part.strip()
-                
-                # Skip invalid/empty parts
-                if part == "FTL." or re.match(r'^-+$', part):
+                if re.match(r'^-+$', part):  # skip only dashes placeholders
                     continue
-                
-                format_parts_set.add(part)
-        
-        return sorted(format_parts_set)
-    
-    def _collect_format_parts_per_format(self, formats_data: Dict[str, Any]) -> Dict[str, List[str]]:
-        """Collect format parts grouped by format"""
-        format_parts_per_format = {}
-        
-        for format_name, fmt in formats_data.items():
-            data_items = fmt.get("data", [])
-            if not isinstance(data_items, list):
-                continue
-            
-            format_parts = set()
-            for item in data_items:
-                part = item.get("formatPart")
-                if not part:
+                # Determine visible index (skip header at idx 0) - map uses idx (1-based alignment from earlier logic)
+                visible_idx = None
+                if idx > 0:
+                    visible_idx = value_index_map.get(idx)
+                # Skip naked header marker 'FTL.' (first entry) without visible index
+                if part == "FTL." and not visible_idx:
                     continue
-                
-                part = part.strip()
-                
-                # Skip invalid/empty parts
-                if part == "FTL." or re.match(r'^-+$', part):
-                    continue
-                
-                format_parts.add(part)
-            
-            format_parts_per_format[format_name] = sorted(format_parts)
-        
-        return format_parts_per_format
+                # Build combined token
+                if visible_idx:
+                    combined = f"{visible_idx} {part}"  # space separator
+                else:
+                    combined = part
+                # store
+                raw_parts_set.add(part)
+                combined_parts_set.add(combined)
+                raw_local.add(part)
+                combined_local.add(combined)
+                # Enrich original item for downstream use
+                if visible_idx and 'valueIndex' not in item:
+                    item['valueIndex'] = visible_idx
+                if 'combinedPart' not in item:
+                    item['combinedPart'] = combined
+            raw_per_format[format_name] = sorted(raw_local)
+            combined_per_format[format_name] = sorted(combined_local)
+
+        return {
+            'rawParts': sorted(raw_parts_set),
+            'combinedParts': sorted(combined_parts_set),
+            'rawPerFormat': raw_per_format,
+            'combinedPerFormat': combined_per_format
+        }
 
 
 def parse_format_data_from_file(filepath: str) -> Dict[str, Any]:
@@ -222,7 +261,7 @@ class FormatDataManager:
             return {
                 "formatParts": [],
                 "count": 0,
-                "message": "No HTML file uploaded"
+                "message": NO_HTML_FILE_MESSAGE
             }
         
         try:
@@ -247,7 +286,7 @@ class FormatDataManager:
                 "formats": {},
                 "formatNames": [],
                 "count": 0,
-                "message": "No HTML file uploaded"
+                "message": NO_HTML_FILE_MESSAGE
             }
         
         try:
@@ -273,7 +312,7 @@ class FormatDataManager:
             return {
                 "formatPartsPerFormat": {},
                 "formatCount": 0,
-                "message": "No HTML file uploaded"
+                "message": NO_HTML_FILE_MESSAGE
             }
         
         try:
@@ -287,6 +326,30 @@ class FormatDataManager:
             logger.error(f"Error getting format parts per format: {e}")
             return {
                 "formatPartsPerFormat": {},
+                "formatCount": 0,
+                "error": str(e)
+            }
+
+    def get_format_parts_per_format_with_index(self) -> Dict[str, Any]:
+        """Get combined (valueIndex + part) format parts per format with metadata"""
+        if not self.file_exists():
+            return {
+                "formatPartsPerFormatWithIndex": {},
+                "formatCount": 0,
+                "message": NO_HTML_FILE_MESSAGE
+            }
+        try:
+            data = self._get_parser().parse()
+            per_format = data.get('formatPartsPerFormatWithIndex', {})
+            return {
+                "formatPartsPerFormatWithIndex": per_format,
+                "formatCount": len(per_format),
+                "message": f"Found indexed parts for {len(per_format)} formats"
+            }
+        except Exception as e:
+            logger.error(f"Error getting format parts per format with index: {e}")
+            return {
+                "formatPartsPerFormatWithIndex": {},
                 "formatCount": 0,
                 "error": str(e)
             }

@@ -606,6 +606,15 @@ async def get_format_parts_per_format():
         logger.error(f"Error getting format parts per format: {e}")
         return {"formatPartsPerFormat": {}, "error": str(e)}
 
+@app.get("/api/format-parts-per-format-with-index")
+async def get_format_parts_per_format_with_index():
+    """Get combined valueIndex + part entries grouped by format"""
+    try:
+        return format_manager.get_format_parts_per_format_with_index()
+    except Exception as e:
+        logger.error(f"Error getting format parts per format with index: {e}")
+        return {"formatPartsPerFormatWithIndex": {}, "error": str(e)}
+
 # OPC UA API Endpoints
 @app.get("/api/opc-ua/status")
 async def get_opc_ua_status():
@@ -1245,7 +1254,7 @@ async def handle_opc_event_listener_config_change(config):
 
 # Neue Endpunkte für Event Listener
 @app.get("/api/opc-ua/events")
-async def get_opc_ua_events(limit: int = 50):
+async def get_opc_ua_events(limit: int = 1000):
     if not opc_event_listener or not opc_event_listener.is_running():
         return {"success": False, "events": [], "running": False}
     events = opc_event_listener.get_events(limit=limit)

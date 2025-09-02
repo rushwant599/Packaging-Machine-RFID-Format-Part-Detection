@@ -61,6 +61,7 @@ logger.info(f"  - OPC UA Node: {OPC_UA_NODE_ID}")
 
 # Initialize managers
 opc_manager = None
+# rfid_opc_manager deprecated (removed functionality)
 rfid_opc_manager = None
 format_manager = None
 assignment_manager = None
@@ -151,27 +152,10 @@ async def lifespan(app: FastAPI):
         await opc_manager.start_monitoring()
         logger.info("OPC UA client auto-started from config.")
     
-    # RFID OPC UA Manager: Separater Client für RFID
+    # RFID OPC UA Manager deprecated: no auto start
     rfid_opc_manager = None
-    if config.get("RFID_OPC_ENABLED", False):
-        from opc_client import OPCUAManager
-        RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4840")
-        RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
-        rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
-        async def rfid_value_change_callback(new_value):
-            # Persist RFID tag if value present
-            tag_val = new_value.get("value")
-            if tag_val and assignment_manager:
-                await assignment_manager.record_rfid_tag(str(tag_val))
-            rfid_data = {
-                "type": "rfid_scan",
-                "tag_id": tag_val,
-                "timestamp": new_value.get("timestamp")
-            }
-            await websocket_manager.broadcast_value_change(rfid_data)
-        rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
-        await rfid_opc_manager.start_monitoring()
-        logger.info("RFID OPC UA client auto-started from config.")
+    if config.get("RFID_OPC_ENABLED"):
+        logger.warning("RFID_OPC_ENABLED is set but RFID OPC client is deprecated and will not start.")
     
     
     # OPC UA Event Bytes Listener (neu)
@@ -315,8 +299,6 @@ async def lifespan(app: FastAPI):
             await _rfid_poll_task
         except Exception:  # noqa: BLE001
             pass
-    if rfid_opc_manager:
-        await rfid_opc_manager.stop_monitoring()
     if assignment_manager:
         await assignment_manager.close()
     if opc_manager:
@@ -378,12 +360,7 @@ class FormatParseResponse(BaseModel):
 class ConfigUpdate(BaseModel):
     OPC_UA_SERVER_URL: Optional[str] = None
     OPC_UA_NODE_ID: Optional[str] = None
-    OPC_UA_ENABLED: Optional[bool] = None
-    RFID_OPC_ENABLED: Optional[bool] = None
-    RFID_OPC_SERVER_URL: Optional[str] = None 
-    RFID_OPC_NODE_ID: Optional[str] = None 
-    # Direct RFID inventory (socket) config
-    RFID_INVENTORY_ENABLED: Optional[bool] = None
+    OPC_UA_ENABLED: Optional[bool] = None    RFID_INVENTORY_ENABLED: Optional[bool] = None
     RFID_READER_IP: Optional[str] = None
     RFID_READER_PORT: Optional[int] = None
     RFID_READER_ANT: Optional[str] = None
@@ -954,15 +931,11 @@ async def update_config(update: ConfigUpdate):
     opc_ua_enabled_after = update.OPC_UA_ENABLED if update.OPC_UA_ENABLED is not None else opc_ua_enabled_before
     opc_ua_config_changed = False
     
-    # Track RFID OPC changes
-    rfid_opc_enabled_before = config.get("RFID_OPC_ENABLED", False)
-    rfid_opc_enabled_after = update.RFID_OPC_ENABLED if update.RFID_OPC_ENABLED is not None else rfid_opc_enabled_before
-    rfid_opc_config_changed = False
+    # RFID OPC deprecated: ignore toggles
     
     # Update all config values
     for key in [
-        "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
-        "RFID_OPC_ENABLED", "RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID",
+    "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
         "RFID_INVENTORY_ENABLED", "RFID_READER_IP", "RFID_READER_PORT", "RFID_READER_ANT",
         "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC",
         "OPC_UA_EVENT_ENABLED", "OPC_UA_EVENT_SERVER_URL", "OPC_UA_EVENT_TYPE",
@@ -975,8 +948,6 @@ async def update_config(update: ConfigUpdate):
             changed = True
             if key in ["OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED"]:
                 opc_ua_config_changed = True
-            elif key in ["RFID_OPC_SERVER_URL", "RFID_OPC_NODE_ID", "RFID_OPC_ENABLED"]:
-                rfid_opc_config_changed = True
     
     if changed:
         save_config(config)
@@ -985,9 +956,7 @@ async def update_config(update: ConfigUpdate):
         # Handle OPC UA changes
         if opc_ua_config_changed:
             await handle_opc_ua_config_change(config, opc_ua_enabled_before, opc_ua_enabled_after)
-        # Handle RFID OPC changes
-        if rfid_opc_config_changed:
-            await handle_rfid_opc_config_change(config, rfid_opc_enabled_before, rfid_opc_enabled_after)
+    # RFID OPC changes ignored
     # Direct RFID inventory
     await handle_direct_rfid_inventory_config_change(config)
     # Event Listener config apply
@@ -1005,10 +974,28 @@ async def handle_direct_rfid_inventory_config_change(config):
 
     enabled = config.get("RFID_INVENTORY_ENABLED", False) and bool(config.get("RFID_READER_IP"))
     desired_ip = config.get("RFID_READER_IP", "")
-    desired_port = int(config.get("RFID_READER_PORT", 2111))
+    # Robust numerische Konvertierung um 500 bei leerem/ungültigem Input zu vermeiden
+    def _to_int(val, default):
+        try:
+            if val is None: return default
+            if isinstance(val, str) and val.strip() == "": return default
+            return int(val)
+        except Exception:
+            logger.warning("RFID config invalid int '%s' -> fallback %s", val, default)
+            return default
+    def _to_float(val, default):
+        try:
+            if val is None: return default
+            if isinstance(val, str) and val.strip() == "": return default
+            return float(val)
+        except Exception:
+            logger.warning("RFID config invalid float '%s' -> fallback %s", val, default)
+            return default
+
+    desired_port = _to_int(config.get("RFID_READER_PORT", 2111), 2111)
     desired_ant = config.get("RFID_READER_ANT", "F")
-    interval = float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1))
-    retention = float(config.get("RFID_CURRENT_RETENTION_SEC", 10))
+    interval = _to_float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1), 1.0)
+    retention = _to_float(config.get("RFID_CURRENT_RETENTION_SEC", 10), 10.0)
     _rfid_retention_sec = retention
 
     restart = False
@@ -1111,53 +1098,7 @@ async def handle_direct_rfid_inventory_config_change(config):
     else:
         logger.info("Direct RFID inventory already running (no restart needed)")
 
-async def handle_rfid_opc_config_change(config, enabled_before, enabled_after):
-    global rfid_opc_manager
-    
-    if enabled_before != enabled_after:
-        if enabled_after:
-            # Enable RFID OPC client
-            from opc_client import OPCUAManager
-            RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
-            RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
-            rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
-            
-            async def rfid_value_change_callback(new_value):
-                tag_val = new_value.get("value")
-                if tag_val and assignment_manager:
-                    await assignment_manager.record_rfid_tag(str(tag_val))
-                rfid_data = {
-                    "type": "rfid_scan",
-                    "tag_id": tag_val,
-                    "timestamp": new_value.get("timestamp")
-                }
-                await websocket_manager.broadcast_value_change(rfid_data)
-            
-            rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
-            await rfid_opc_manager.start_monitoring()
-            logger.info("RFID OPC client enabled and started live.")
-        else:
-            # Restart with new config
-            await rfid_opc_manager.stop_monitoring()
-            from opc_client import OPCUAManager
-            RFID_OPC_SERVER_URL = config.get("RFID_OPC_SERVER_URL", "opc.tcp://localhost:4841")
-            RFID_OPC_NODE_ID = config.get("RFID_OPC_NODE_ID", "ns=2;i=2")
-            rfid_opc_manager = OPCUAManager(RFID_OPC_SERVER_URL, RFID_OPC_NODE_ID, enabled=True)
-
-            async def rfid_value_change_callback(new_value):
-                tag_val = new_value.get("value")
-                if tag_val and assignment_manager:
-                    await assignment_manager.record_rfid_tag(str(tag_val))
-                rfid_data = {
-                    "type": "rfid_scan",
-                    "tag_id": tag_val,
-                    "timestamp": new_value.get("timestamp")
-                }
-                await websocket_manager.broadcast_value_change(rfid_data)
-
-            rfid_opc_manager.add_value_change_callback(rfid_value_change_callback)
-            await rfid_opc_manager.start_monitoring()
-            logger.info("RFID OPC client restarted live with new config.")
+# handle_rfid_opc_config_change removed (deprecated)
 
 async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
     global opc_manager

@@ -81,12 +81,14 @@ export default function CustomerPage() {
           try {
             const message = JSON.parse(event.data);
             if (message.type === 'value_change' && message.data) {
-              console.log("OPC UA Wertänderung empfangen:", message.data);
-              setActiveFormat(message.data.value?.toString() ?? "Unbekannter Wert");
+              // Unterscheide zwischen echtem OPC UA Wert (mit value Feld) und anderen Broadcasts (opc_event, rfid_inventory ...)
+              const hasValue = Object.prototype.hasOwnProperty.call(message.data, 'value') && message.data.value !== null && message.data.value !== undefined;
+              if (hasValue) {
+                setActiveFormat(String(message.data.value));
+              }
               setConnectionStatus('connected');
-              // Zusätzliche Verarbeitung für OPC Event Payload -> Hex IDs
+              // Verarbeitung für OPC Event Payload -> Hex IDs (ändert activeFormat NICHT)
               if (message.data.type === 'opc_event' && typeof message.data.payload === 'string') {
-                // Extrahiere Hex IDs NUR aus diesem einen Event -> ersetzt vorherige Anzeige
                 const payload: string = message.data.payload.replace(/<STX>|<ETX>/g, '');
                 const ids: string[] = [];
                 const seen = new Set<string>();

@@ -11,10 +11,7 @@ type Config = {
   OPC_UA_EVENT_TYPE: string;
   OPC_UA_EVENT_INTERVAL_MS: number;
   OPC_UA_EVENT_MAX_EVENTS: number;
-  RFID_OPC_SERVER_URL: string;
-  RFID_OPC_NODE_ID: string;
   OPC_UA_ENABLED: boolean;
-  RFID_OPC_ENABLED: boolean;
   RFID_INVENTORY_ENABLED: boolean;
   RFID_READER_IP: string;
   RFID_READER_PORT: number;
@@ -31,10 +28,7 @@ const defaultConfig: Config = {
   OPC_UA_EVENT_TYPE: "",
   OPC_UA_EVENT_INTERVAL_MS: 500,
   OPC_UA_EVENT_MAX_EVENTS: 500,
-  RFID_OPC_SERVER_URL: "",
-  RFID_OPC_NODE_ID: "",
   OPC_UA_ENABLED: false,
-  RFID_OPC_ENABLED: false,
   RFID_INVENTORY_ENABLED: false,
   RFID_READER_IP: "",
   RFID_READER_PORT: 2111,
@@ -71,10 +65,7 @@ export default function SomicPage() {
           OPC_UA_EVENT_TYPE: data.OPC_UA_EVENT_TYPE || "",
           OPC_UA_EVENT_INTERVAL_MS: Number(data.OPC_UA_EVENT_INTERVAL_MS ?? 500),
           OPC_UA_EVENT_MAX_EVENTS: Number(data.OPC_UA_EVENT_MAX_EVENTS ?? 500),
-          RFID_OPC_SERVER_URL: data.RFID_OPC_SERVER_URL || "",
-          RFID_OPC_NODE_ID: data.RFID_OPC_NODE_ID || "",
           OPC_UA_ENABLED: !!data.OPC_UA_ENABLED,
-          RFID_OPC_ENABLED: !!data.RFID_OPC_ENABLED,
           RFID_INVENTORY_ENABLED: !!data.RFID_INVENTORY_ENABLED,
           RFID_READER_IP: data.RFID_READER_IP || "",
             RFID_READER_PORT: data.RFID_READER_PORT ?? 2111,
@@ -260,18 +251,6 @@ export default function SomicPage() {
                     <div className="flex items-center">
                       <input
                         type="checkbox"
-                        name="RFID_OPC_ENABLED"
-                        checked={config.RFID_OPC_ENABLED}
-                        onChange={handleChange}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label className="ml-2 block text-sm text-black">
-                        Enable RFID OPC
-                      </label>
-                    </div>
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
                         name="OPC_UA_EVENT_ENABLED"
                         checked={config.OPC_UA_EVENT_ENABLED}
                         onChange={handleChange}
@@ -342,28 +321,6 @@ export default function SomicPage() {
                           <div>
                             <label className="block text-sm font-medium text-black">Max Events (Buffer)</label>
                             <input type="number" name="OPC_UA_EVENT_MAX_EVENTS" value={config.OPC_UA_EVENT_MAX_EVENTS} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => setOpenSection(openSection === 'rfidopc' ? null : 'rfidopc')}
-                        className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
-                      >
-                        <span>RFID OPC Settings</span>
-                        <span>{openSection === 'rfidopc' ? '−' : '+'}</span>
-                      </button>
-                      {openSection === 'rfidopc' && (
-                        <div className="mt-2 space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-black">RFID Server URL</label>
-                            <input type="text" name="RFID_OPC_SERVER_URL" value={config.RFID_OPC_SERVER_URL} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-black">RFID OPC Node ID</label>
-                            <input type="text" name="RFID_OPC_NODE_ID" value={config.RFID_OPC_NODE_ID} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                         </div>
                       )}

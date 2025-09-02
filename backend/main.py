@@ -360,7 +360,8 @@ class FormatParseResponse(BaseModel):
 class ConfigUpdate(BaseModel):
     OPC_UA_SERVER_URL: Optional[str] = None
     OPC_UA_NODE_ID: Optional[str] = None
-    OPC_UA_ENABLED: Optional[bool] = None    RFID_INVENTORY_ENABLED: Optional[bool] = None
+    OPC_UA_ENABLED: Optional[bool] = None    
+    RFID_INVENTORY_ENABLED: Optional[bool] = None
     RFID_READER_IP: Optional[str] = None
     RFID_READER_PORT: Optional[int] = None
     RFID_READER_ANT: Optional[str] = None

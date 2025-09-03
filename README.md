@@ -140,6 +140,7 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 - **The frontend API client always uses the URL from `NEXT_PUBLIC_BACKEND_URL`.**
 - **OPC UA and WebSocket are optional and can be disabled via `.env`.**
 - **Questions?** → See code comments and the `README.md` in the backend folder.
+- **Path to picture folder** Set correct path in backend/main.py - list-pictures()
 
 ---
 

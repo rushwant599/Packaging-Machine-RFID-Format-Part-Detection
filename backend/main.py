@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
 import asyncio
 import time
@@ -964,6 +965,17 @@ async def update_config(update: ConfigUpdate):
     await handle_opc_event_listener_config_change(config)
     
     return config
+
+app.mount("/pictures", StaticFiles(directory="pictures"), name="pictures")
+@app.get("/api/pictures")
+def list_pictures():
+    folder = Path(r"C:\Users\m.zink\OneDrive - Somic Verwaltungs GmbH\Desktop 1\Format-RFIDParts\pictures")
+    try:
+        files = os.listdir(folder)
+        return JSONResponse(files)
+    except Exception as e:
+        logger.error(f"Error retrieving pictures: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving pictures")
 
 async def handle_direct_rfid_inventory_config_change(config):
     """Start/stop/restart des direkten RFID Inventory Pollings je nach Config.

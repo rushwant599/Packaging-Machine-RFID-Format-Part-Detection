@@ -156,6 +156,7 @@ function updatePartsDisplay() {
     assigned.innerHTML = `
       <label>${p.id}</label>
       <input type="checkbox" id="check-${p.id}" class="assign-check" disabled>
+      <button onClick="showPicture('${p.id}')">Show picture</button>
     `;
     assignedList.appendChild(assigned);
   });
@@ -249,6 +250,61 @@ async function saveAssignment(formatPart, rfidTagId) {
     console.error('Error saving assignment:', error);
     return false;
   }
+}
+
+// Config for showPicture
+let currentIndex = 0;
+let matchedPictures = [];
+
+const preview = document.getElementById("preview");
+preview.addEventListener("click", hidePicture);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hidePicture();
+  if (event.key === "ArrowLeft") showPrevious();
+  if (event.key === "ArrowRight") showNext();
+});
+
+async function showPicture(id) {
+  const response = await fetch(`${API_BASE_URL}/api/pictures`);
+  const pictures = await response.json();
+
+  matchedPictures = pictures.filter(pic => pic.split('.')[0].startsWith(id));
+
+  if (matchedPictures.length > 0) {
+    currentIndex = 0;
+    showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
+  } else {
+    console.warn("No picture found for ", id);
+    hidePicture();
+  }
+}
+
+function showPictureFullScreen(src) {
+  preview.src = src;
+  preview.style.display = "block";
+  setTimeout(() => preview.classList.add("visible"), 10);
+}
+
+function hidePicture() {
+  preview.classList.remove("visible");
+  preview.addEventListener("transitionend", function handler() {
+    preview.style.display = "none";
+    preview.src = "";
+    preview.removeEventListener("transitionend", handler);
+  });
+}
+
+function showPrevious() {
+  if (matchedPictures.length === 0) return;
+  currentIndex = (currentIndex - 1 + matchedPictures.length) % matchedPictures.length;
+  showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
+}
+
+function showNext() {
+  if (matchedPictures.length === 0) return;
+  currentIndex = (currentIndex + 1) % matchedPictures.length;
+  showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
 }
 
 // Initialize the application

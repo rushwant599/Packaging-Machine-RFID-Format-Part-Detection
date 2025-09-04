@@ -53,6 +53,29 @@ export default function CustomerPage() {
   let currentSubSection: string | null = null;           // Text aus caption
   let currentLineHtml: string | undefined = undefined;   // letzte caption_line HTML (inkl. Bilder)
 
+        // Helper: extrahiere aus einer <tr class=" line"> Zeile nur Pfeil + Text (2. Zelle) und forme sie zu einer flachen flex-Zeile
+        const buildLineRowHtml = (raw: string | undefined): string | undefined => {
+          if (!raw) return raw;
+            try {
+              const tdMatches = raw.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+              if (tdMatches && tdMatches.length >= 2) {
+                const inner = (td: string) => {
+                  const m = td.match(/<td[^>]*>([\s\S]*?)<\/td>/i);
+                  return m ? m[1].trim() : '';
+                };
+                const arrow = inner(tdMatches[0]);
+                let body = inner(tdMatches[1]);
+                // Whitespace reduzieren
+                body = body.replace(/\s+/g, ' ').trim();
+                return `<div style="display:flex;align-items:center;gap:8px;font-size:.8rem;color:#111;line-height:1.25;">`+
+                  `<span style=\"font-weight:600;\">${arrow}</span>`+
+                  `<span style=\"display:inline-flex;align-items:center;gap:6px;\">${body}</span>`+
+                `</div>`;
+              }
+            } catch { /* ignore */ }
+          return raw; // Fallback: original HTML
+        };
+
         rowsMeta.forEach((row: any, idx: number) => {
           const text = (row?.text || '').trim();
           if (!text) return;
@@ -82,17 +105,17 @@ export default function CustomerPage() {
               return;
             case 'data':
               // Zuerst prüfen ob es eine reine line Zeile ist (auch wenn noch keine Sektion existiert)
-              if (Array.isArray(row.classes) && row.classes.includes('line') && !row.classes.includes('caption')) {
+        if (Array.isArray(row.classes) && row.classes.includes('line') && !row.classes.includes('caption')) {
                 const sectionName = currentSection || 'Allgemeine Vorbereitung';
                 prepared.push({
                   index: idx,
-                  section: sectionName,
+          section: sectionName,
                   subSection: undefined,
                   headerCells: undefined,
                   cells: [],
                   lineHtml: currentLineHtml,
                   kind: 'line',
-                  lineContentHtml: row.html || undefined,
+          lineContentHtml: buildLineRowHtml(row.html || undefined),
                 });
                 return;
               }
@@ -145,12 +168,14 @@ export default function CustomerPage() {
           {current && (
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ fontSize: '.75rem', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700, color: '#111', opacity: 0.9 }}>{current.section}</div>
+                {current.kind === 'data' && (
+                  <div style={{ fontSize: '.75rem', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700, color: '#111', opacity: 0.9 }}>{current.section}</div>
+                )}
                 {current.kind === 'data' && current.subSection && (
                   <div style={{ fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600, color: '#222' }}>{current.subSection}</div>
                 )}
                 {current.kind === 'line' && current.lineContentHtml && (
-                  <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
+                  <div style={{ marginTop: 0 }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
                 )}
               </div>
               {current.kind === 'data' && (

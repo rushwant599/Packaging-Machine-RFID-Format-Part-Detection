@@ -17,6 +17,7 @@ import json
 from opc_client import OPCUAManager
 from rfu_ivsingle_inventory import AsyncRFUInventoryClient, RFUInventoryError
 from format_parser import FormatDataManager
+from html_table_parser import MainTableRowExtractor
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
 from opc_event_bytes_listener import OPCUAEventBytesListener
@@ -460,6 +461,49 @@ async def get_customer_html():
     except Exception as e:
         logger.error(f"Error reading HTML cache: {e}")
         raise HTTPException(status_code=500, detail="Error reading HTML cache")
+
+@app.get("/api/main-table-rows")
+async def get_main_table_rows(
+    as_html: bool = True,
+    strip_whitespace: bool = False,
+    with_meta: bool = False,
+    duplicate_caption: bool = False
+):
+    """Extract all <tr> rows from the cached <table class="main">.
+
+    Query Params:
+        as_html: Return raw HTML (default) or plain text.
+        strip_whitespace: Trim whitespace around HTML rows.
+        with_meta: Include class meta + flags (adds rowsMeta output format when true).
+        duplicate_caption: After every row with classes 'caption line' append all rows having only class 'caption'.
+    """
+    if not HTML_CACHE_PATH.exists():
+        raise HTTPException(status_code=404, detail="customer-html-cache.html not found. Upload a file first.")
+    try:
+        extractor = MainTableRowExtractor(str(HTML_CACHE_PATH))
+        rows = extractor.extract_rows(
+            as_html=as_html,
+            strip_whitespace=strip_whitespace,
+            with_meta=with_meta,
+            duplicate_caption=duplicate_caption
+        )
+        resp = {
+            "success": True,
+            "count": len(rows),
+            "as_html": as_html,
+            "with_meta": with_meta,
+            "duplicate_caption": duplicate_caption,
+        }
+        if with_meta:
+            resp["rowsMeta"] = rows
+        else:
+            resp["rows"] = rows
+        return resp
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="HTML cache file not found")
+    except Exception as e:
+        logger.exception("Error extracting main table rows: %s", e)
+        raise HTTPException(status_code=500, detail="Error extracting rows")
 
 @app.post("/api/customer-html")
 async def upload_customer_html(file: UploadFile = File(...)):

@@ -1,15 +1,18 @@
 "use client";
 import Header from "@/components/Header";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { apiClient } from "@/lib/api-client";
 
 export default function CustomerPage() {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  const [activeFormat, setActiveFormat] = useState<string | null>(null);
-  const [formatLoading, setFormatLoading] = useState<boolean>(true);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'error'>('connecting');
-  // Nur die IDs des zuletzt empfangenen OPC Events
-  const [liveEventIds, setLiveEventIds] = useState<string[]>([]);
-  const HEX_EVENT_REGEX = /Ausgabe:([0-9A-Fa-f]+)/g;
+  // (Ehemalige OPC-UA / Live Event States entfernt für vereinfachte Kundenansicht)
+  // Step-by-step state
+  type Step = { index: number; section: string; subSection?: string; headerCells?: string[]; cells: string[]; lineHtml?: string };
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [stepsLoading, setStepsLoading] = useState(false);
+  const [stepsError, setStepsError] = useState<string | null>(null);
+  // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
   // Beim Laden die aktuelle Datei vom Server holen
   useEffect(() => {
@@ -24,218 +27,123 @@ export default function CustomerPage() {
       });
   }, []);
 
-  // Aktives Format von OPC UA - nur beim Laden + WebSocket für Änderungen
+  // Lade geparste Tabellen-Zeilen aus Backend und bereite Steps auf
   useEffect(() => {
-    let websocket: WebSocket | null = null;
-    let reconnectTimer: NodeJS.Timeout | null = null;
-    
-    // Initiale Ladung des aktuellen Werts
-    const loadInitialValue = async () => {
+    const loadSteps = async () => {
+      setStepsLoading(true);
+      setStepsError(null);
       try {
-        setFormatLoading(true);
-        const response = await fetch("/api/opc-ua/value");
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data?.value !== undefined && data.data?.value !== null) {
-            setActiveFormat(data.data.value.toString());
-            setConnectionStatus('connected');
-          } else {
-            setActiveFormat("Kein Format aktiv");
-            setConnectionStatus('error');
+  // asHtml true damit wir die originalen <tr class="line"> Zeilen (inkl. Bilder) rendern können
+  const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: true });
+        const rowsMeta = (data as any).rowsMeta as any[] | undefined;
+        if (!rowsMeta) { setSteps([]); return; }
+        const prepared: Step[] = [];
+  let currentSection: string | null = null;             // aus caption_line
+  let currentHeaderCells: string[] | undefined = undefined; // Kopfzeilen aus caption
+  let currentSubSection: string | null = null;           // Text aus caption
+  let currentLineHtml: string | undefined = undefined;   // letzte caption_line HTML (inkl. Bilder)
+
+        rowsMeta.forEach((row: any, idx: number) => {
+          const text = (row?.text || '').trim();
+          if (!text) return;
+          switch (row.row_type) {
+            case 'caption_line':
+              currentSection = text;
+              currentHeaderCells = undefined;
+              currentSubSection = null;
+              currentLineHtml = row.html || undefined;
+              return;
+            case 'caption':
+              currentHeaderCells = row.cells?.length ? row.cells : currentHeaderCells;
+              currentSubSection = text;
+              return;
+            case 'data':
+              if (!currentSection) return;
+              prepared.push({
+                index: idx,
+                section: currentSection,
+                subSection: currentSubSection || undefined,
+                headerCells: currentHeaderCells,
+                cells: row.cells || [],
+                lineHtml: currentLineHtml
+              });
+              return;
+            default:
+              return;
           }
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          setActiveFormat(errorData.detail ?? "OPC-UA Server nicht erreichbar");
-          setConnectionStatus('error');
-        }
-      } catch (error) {
-        console.error("Fehler beim Laden des initialen Formats:", error);
-        setActiveFormat("Verbindungsfehler");
-        setConnectionStatus('error');
+        });
+        setSteps(prepared);
+        setCurrentStep(0);
+      } catch (e: any) {
+        setStepsError(e?.message || 'Fehler beim Laden der Schritt-Liste');
       } finally {
-        setFormatLoading(false);
+        setStepsLoading(false);
       }
     };
-
-    const scheduleReconnect = () => {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-      reconnectTimer = setTimeout(setupWebSocket, 5000);
-    };
-
-    // WebSocket für Echtzeit-Updates bei Wertänderungen
-    const setupWebSocket = () => {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
-      const wsUrl = backendUrl.replace(/^http/, 'ws') + '/ws/opc-ua';
-      
-      try {
-        websocket = new WebSocket(wsUrl);
-        
-        websocket.onopen = () => {
-          console.log("WebSocket-Verbindung für OPC UA Updates hergestellt");
-          setConnectionStatus('connected');
-        };
-        
-        websocket.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            if (message.type === 'value_change' && message.data) {
-              // Unterscheide zwischen echtem OPC UA Wert (mit value Feld) und anderen Broadcasts (opc_event, rfid_inventory ...)
-              const hasValue = Object.prototype.hasOwnProperty.call(message.data, 'value') && message.data.value !== null && message.data.value !== undefined;
-              if (hasValue) {
-                setActiveFormat(String(message.data.value));
-              }
-              setConnectionStatus('connected');
-              // Verarbeitung für OPC Event Payload -> Hex IDs (ändert activeFormat NICHT)
-              if (message.data.type === 'opc_event' && typeof message.data.payload === 'string') {
-                const payload: string = message.data.payload.replace(/<STX>|<ETX>/g, '');
-                const ids: string[] = [];
-                const seen = new Set<string>();
-                let m: RegExpExecArray | null;
-                while ((m = HEX_EVENT_REGEX.exec(payload)) !== null) {
-                  const id = (m[1] || '').toUpperCase();
-                  if (!id || seen.has(id)) continue;
-                  seen.add(id);
-                  ids.push(id);
-                }
-                setLiveEventIds(ids);
-              }
-            }
-          } catch (parseError) {
-            console.error("Fehler beim Parsen der WebSocket-Nachricht:", parseError);
-          }
-        };
-        
-        websocket.onerror = (error) => {
-          console.error("WebSocket-Fehler:", error);
-          setConnectionStatus('error');
-        };
-        
-        websocket.onclose = () => {
-          console.log("WebSocket-Verbindung geschlossen");
-          setConnectionStatus('error');
-          scheduleReconnect();
-        };
-        
-      } catch (error) {
-        console.error("WebSocket-Setup fehlgeschlagen:", error);
-        setConnectionStatus('error');
-      }
-    };
-
-    // Initiale Ladung und WebSocket-Setup
-    loadInitialValue().then(() => {
-      setupWebSocket();
-    });
-    
-    return () => {
-      if (websocket) {
-        websocket.close();
-      }
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
-    };
+    loadSteps();
   }, []);
 
+  const current = steps[currentStep];
+  const hasPrev = currentStep > 0;
+  const hasNext = currentStep < steps.length - 1;
+  const goto = useCallback((delta: number) => {
+    setCurrentStep(s => {
+      const next = s + delta;
+      if (next < 0) return 0;
+      if (next >= steps.length) return steps.length - 1;
+      return next;
+    });
+  }, [steps.length]);
   return (
-    <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: "100vh" }}>
+    <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: '100vh' }}>
       <Header profile="Customer" />
-      <main
-        className="flex-1 w-full p-0 m-0"
-        style={{ background: "#fff", height: "100%" }}
-      >
-        <div
-          className="p-4"
-          style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem" }}
-        >
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex flex-col gap-1" style={{ minWidth: '200px' }}>
-              <span style={{ fontSize: '0.70rem', letterSpacing: '0.05em', color: '#555', fontWeight: 600 }}>LIVE EVENT TAGS (Letztes Event)</span>
-              <div style={{
-                background: '#000',
-                border: '1px solid #333',
-                padding: '4px 6px',
-                borderRadius: '4px',
-                fontFamily: 'monospace',
-                fontSize: '0.7rem',
-                maxWidth: '260px',
-                maxHeight: '360px',
-                overflowY: 'auto',
-                lineHeight: '1.15'
-              }} title={liveEventIds.length ? `${liveEventIds.length} IDs` : 'Keine IDs'}>
-                {liveEventIds.length ? (
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                    {liveEventIds.map(id => (
-                      <li key={id} style={{ color: '#e0e0e0', padding: '1px 0', borderBottom: '1px solid #1d1d1d' }}>
-                        {id}
-                      </li>
-                    ))}
-                  </ul>
-                ) : <span style={{ color: '#777' }}>—</span>}
+      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%' }}>
+        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa' }}>
+          <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
+          {stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Lade Schritte…</div>}
+          {stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
+          {!stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
+          {current && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontSize: '.75rem', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700, color: '#111', opacity: 0.9 }}>{current.section}</div>
+                {current.subSection && <div style={{ fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600, color: '#222' }}>{current.subSection}</div>}
+                {current.lineHtml && (
+                  <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: current.lineHtml }} />
+                )}
               </div>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '.75rem', color: '#111', tableLayout: 'fixed' }}>
+                {current.headerCells && current.headerCells.length > 0 && (
+                  <thead>
+                    <tr>
+                      {current.headerCells.map((h: string, i: number) => {
+                        const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
+                        const colCount = current.headerCells?.length || 1;
+                        return <th key={key} style={{ border: '1px solid #bbb', padding: '4px 6px', background: '#f0f0f0', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: `${100 / colCount}%` }}>{h}</th>;
+                      })}
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  <tr>
+                    {current.cells.map((c: string, i: number) => {
+                      const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
+                      const colCount = current.headerCells?.length || current.cells.length || 1;
+                      return <td key={key} style={{ border: '1px solid #ccc', padding: '4px 6px', background: '#fff', fontSize: '.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: `${100 / colCount}%` }}>{c}</td>;
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '4px 10px', fontSize: '.75rem', background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
+                <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '4px 10px', fontSize: '.75rem', background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
+                <div style={{ fontSize: '.65rem', color: '#111', marginLeft: 'auto' }}>Schritt {currentStep + 1} / {steps.length}</div>
+              </div>
+              <input type="range" min={0} max={Math.max(steps.length - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%' }} />
             </div>
-            <div className="flex items-center gap-2">
-              <span style={{ color: "#666", fontWeight: "500" }}>
-                Aktives Format:
-              </span>
-              {formatLoading ? (
-                <span style={{ color: "#999" }}>Lädt...</span>
-              ) : (
-                <span 
-                  style={{ 
-                    color: activeFormat === "Kein Format aktiv" || 
-                           activeFormat === "Fehler beim Laden" || 
-                           activeFormat === "Verbindungsfehler" || 
-                           activeFormat === "Datenformat-Fehler" ? "#ff6b6b" : "#28a745",
-                    fontWeight: "600"
-                  }}
-                >
-                  {activeFormat}
-                </span>
-              )}
-              {/* Verbindungsindikator */}
-              <div 
-                style={{
-                  width: "8px",
-                  height: "8px",
-                  borderRadius: "50%",
-                  backgroundColor: (() => {
-                    switch (connectionStatus) {
-                      case 'connected': return "#28a745";
-                      case 'connecting': return "#ffc107";
-                      case 'error': return "#ff6b6b";
-                      default: return "#6c757d";
-                    }
-                  })(),
-                  marginLeft: "4px"
-                }}
-                title={(() => {
-                  switch (connectionStatus) {
-                    case 'connected': return 'Verbunden';
-                    case 'connecting': return 'Verbinde...';
-                    case 'error': return 'Verbindungsfehler';
-                    default: return 'Unbekannt';
-                  }
-                })()}
-              />
-            </div>
-          </div>
+          )}
         </div>
-        {fileUrl && (
-          <iframe
-            src={fileUrl}
-            title="Externe HTML"
-            style={{
-              width: "100%",
-              height: "100%",
-              border: "none",
-              background: "#fff",
-              display: "block"
-            }}
-          />
-        )}
+        {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', height: '100%', border: 'none', background: '#fff', display: 'block' }} />}
       </main>
     </div>
   );

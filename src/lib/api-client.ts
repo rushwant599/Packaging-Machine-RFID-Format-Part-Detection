@@ -129,6 +129,19 @@ class APIClient {
     return this.request('/api/format-parts');
   }
 
+  // Main table rows (parsed <tr> blocks)
+  async getMainTableRows(options?: { asHtml?: boolean; withMeta?: boolean; duplicateCaption?: boolean; stripWhitespace?: boolean }) {
+    const { asHtml = false, withMeta = true, duplicateCaption = true, stripWhitespace = false } = options || {};
+    const qs = new URLSearchParams({
+      as_html: asHtml ? 'true' : 'false',
+      with_meta: withMeta ? 'true' : 'false',
+      duplicate_caption: duplicateCaption ? 'true' : 'false',
+      strip_whitespace: stripWhitespace ? 'true' : 'false'
+    });
+    const endpoint = `/api/main-table-rows?${qs.toString()}`;
+    return this.request(endpoint);
+  }
+
   async getFormats() {
     return this.request('/api/formats');
   }

@@ -262,19 +262,18 @@ export default function CustomerPage() {
   // --- RFID Assignments + Live Sichtbarkeit ---
   const [assignments, setAssignments] = React.useState<Record<string, any>>({}); // format_part -> { rfid_tag_id }
   const [liveEventTagIds, setLiveEventTagIds] = React.useState<Set<string>>(new Set());
-  // Poll assignments einmalig + alle 30s
+  // Assignments nur beim (erstmaligen) Laden und wenn Format gewechselt wird holen (statt Dauer-Polling)
   useEffect(() => {
-    let stopped = false;
-    const loadAssignments = async () => {
+    let cancelled = false;
+    const fetchOnce = async () => {
       try {
         const json: any = await apiClient.getFormatAssignments();
-        if (!stopped && json && json.success) setAssignments(json.assignments || {});
+        if (!cancelled && json?.success) setAssignments(json.assignments || {});
       } catch {}
     };
-    loadAssignments();
-    const iv = setInterval(loadAssignments, 30000);
-    return () => { stopped = true; clearInterval(iv); };
-  }, []);
+    fetchOnce();
+    return () => { cancelled = true; };
+  }, [selectedFormat]);
   // WebSocket für Live-Event-IDs + Assignments Updates
   useEffect(() => {
     let ws: WebSocket | null = null;

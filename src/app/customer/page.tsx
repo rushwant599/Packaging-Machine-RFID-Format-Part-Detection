@@ -3,38 +3,79 @@ import Header from "@/components/Header";
 import React, { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 
+// -------------------- Typdefinitionen --------------------
+interface RowMeta {
+  row_type: 'caption_line' | 'caption' | 'data';
+  text?: string;
+  html?: string;
+  cells?: string[];
+  classes?: string[];
+}
+
+interface FormatItem {
+  value?: string;
+  formatValue?: string;
+  valueIndex?: string; // sichtbare Nummer
+  formatPart?: string; // FTL.
+  cart?: string;       // Wagen
+  [k: string]: unknown;
+}
+
+interface FormatDetail {
+  valueIndexMap?: Record<number, string>;
+  formats?: Record<string, { data?: FormatItem[] } & Record<string, unknown>>;
+  data?: { formats?: Record<string, { data?: FormatItem[] }> };
+  success?: boolean;
+}
+
+interface AssignmentsMapEntry { rfid_tag_id?: string; rfidTagId?: string; [k: string]: unknown }
+type AssignmentsMap = Record<string, AssignmentsMapEntry | string>;
+
+interface RFIDStatus {
+  seen: boolean;
+  tagId: string | null;
+  tagIdNorm: string | null;
+  keyTried?: string;
+  symbol: string; // ✔ / ✖ / –
+}
+
+interface StepBase {
+  index: number;
+  section: string;
+  subSection?: string;
+  headerCells?: string[];
+  cells: string[];
+  lineHtml?: string;
+  kind: 'line' | 'data';
+  lineContentHtml?: string;
+}
+
+interface Step extends StepBase {
+  _injectedValue?: boolean;
+  _prevValue?: string;
+  _rfidStatus?: RFIDStatus;
+}
+
 export default function CustomerPage() {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  // (Ehemalige OPC-UA / Live Event States entfernt für vereinfachte Kundenansicht)
-  // Step-by-step state
-  type Step = {
-    index: number;
-    section: string;
-    subSection?: string;
-    headerCells?: string[];
-    cells: string[];
-    lineHtml?: string; // for caption_line (context) or last seen
-    kind: 'line' | 'data';
-    lineContentHtml?: string; // for pure <tr class="line"> steps
-  };
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
+  const [showSteps, setShowSteps] = useState(true);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState<string | null>(null);
   // Format Auswahl
-  const [formats, setFormats] = useState<Record<string, any>>({});
+  const [formats, setFormats] = useState<Record<string, unknown>>({});
   const [formatNames, setFormatNames] = useState<string[]>([]);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
   // Layout / Style Konstanten für den Step-Block
-  const STEP_PANEL_HEIGHT = 250; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
+  const STEP_PANEL_HEIGHT = 220; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
   const STEP_FONT_SIZE = '.95rem'; // etwas größer für bessere Lesbarkeit
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
   const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
-  // RFID Status: zusätzliche (optionale) Spalte ganz rechts
-  const STATUS_COL_TITLE = 'RFID';
+  // RFID Status-Spalte wird dynamisch angezeigt, kein Konstante nötig
   // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
   // Beim Laden die aktuelle Datei vom Server holen
@@ -58,8 +99,8 @@ export default function CustomerPage() {
       try {
   // asHtml true damit wir die originalen <tr class="line"> Zeilen (inkl. Bilder) rendern können
   // duplicateCaption=false: verhindert doppelte Überschrift/Caption-Ausgabe
-  const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false });
-        const rowsMeta = (data as any).rowsMeta as any[] | undefined;
+  const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
+  const rowsMeta = data.rowsMeta;
         if (!rowsMeta) { setSteps([]); return; }
         const prepared: Step[] = [];
   let currentSection: string | null = null;             // aus caption_line
@@ -103,7 +144,7 @@ export default function CustomerPage() {
             + `</div>`;
         };
 
-        rowsMeta.forEach((row: any, idx: number) => {
+  rowsMeta.forEach((row: RowMeta, idx: number) => {
           const text = (row?.text || '').trim();
           if (!text) return;
           switch (row.row_type) {
@@ -163,8 +204,8 @@ export default function CustomerPage() {
         });
         setSteps(prepared);
         setCurrentStep(0);
-      } catch (e: any) {
-        setStepsError(e?.message || 'Fehler beim Laden der Schritt-Liste');
+      } catch (e) {
+        setStepsError(e instanceof Error ? e.message : 'Fehler beim Laden der Schritt-Liste');
       } finally {
         setStepsLoading(false);
       }
@@ -178,30 +219,30 @@ export default function CustomerPage() {
       setFormatLoading(true); setFormatError(null);
       try {
   // Verwende Backend API Client (verhindert 404 auf Next.js eigener /api Route)
-  const json: any = await apiClient.getFormats();
+  const json = await apiClient.getFormats() as { formats?: Record<string, unknown> };
   const fmts = json.formats || {};
         setFormats(fmts);
         setFormatNames(Object.keys(fmts));
-      } catch (e: any) {
-        setFormatError(e.message || 'Unbekannter Fehler');
+      } catch (e) {
+        setFormatError(e instanceof Error ? e.message : 'Unbekannter Fehler');
       } finally { setFormatLoading(false); }
     };
     loadFormats();
   }, []);
 
   // Format-Detaildaten (inkl. valueIndexMap) laden sobald ein Format gewählt ist
-  const [formatDetail, setFormatDetail] = React.useState<any | null>(null);
+  const [formatDetail, setFormatDetail] = React.useState<FormatDetail | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    const loadDetail = async () => {
+  interface FormatDataApiResponse { success?: boolean; data?: FormatDetail }
+  const loadDetail = async () => {
       if (!selectedFormat) { setFormatDetail(null); return; }
       try {
-        const detail: any = await apiClient.getFormatData();
-        // detail.data.formats enthält alle Formate; wir filtern das ausgewählte heraus
-        if (!cancelled && detail && detail.success && detail.data) {
-          setFormatDetail(detail.data);
+    const detail = await apiClient.getFormatData() as FormatDataApiResponse;
+    if (!cancelled && detail?.success && detail.data) {
+      setFormatDetail(detail.data);
         }
-      } catch (e) {
+    } catch {
         if (!cancelled) setFormatDetail(null);
       }
     };
@@ -211,11 +252,13 @@ export default function CustomerPage() {
 
   // Werte aus gewähltem Format in Steps projizieren (nutzt valueIndexMap + items)
   const enrichedSteps = React.useMemo(() => {
-    if (!selectedFormat || !formats[selectedFormat]) return steps;
-    const fmt = formats[selectedFormat];
+  if (!selectedFormat || !formats[selectedFormat]) return steps;
+  const fmt = formats[selectedFormat];
     const allFormatsFromDetail = formatDetail?.formats || {};
     const detailFmt = allFormatsFromDetail[selectedFormat] || fmt; // Fallback auf einfache Formats-Struktur
-    const dataItems: any[] = Array.isArray(detailFmt?.data) ? detailFmt.data : [];
+  const dataItems: FormatItem[] = Array.isArray((detailFmt as { data?: unknown })?.data)
+    ? (detailFmt as { data?: FormatItem[] }).data || []
+    : [];
     const valueIndexMap: Record<number, string> = (formatDetail?.valueIndexMap) || {};
 
     // Map sichtbare Nummer -> Wert (value), FTL. (formatPart) und Wagen (cart)
@@ -241,34 +284,34 @@ export default function CustomerPage() {
       }
     });
 
-    const base = steps.map(s => {
+    const base = steps.map<Step>(s => {
       if (s.kind !== 'data' || !s.cells.length) return s;
       const nr = (s.cells[0] || '').toString().trim();
       if (!nr) return s;
-  const val = numberToValue[nr];
-  const ftl = numberToFTL[nr];
-  const cart = numberToCart[nr];
-  if (!val && !ftl && !cart) return s; // nichts zu tun
-  const cellsCopy = [...s.cells];
-  const prevVal = cellsCopy[2];
-  if (val) cellsCopy[2] = val; // Wert
-  if (ftl) cellsCopy[3] = ftl; // FTL.
-  if (cart) cellsCopy[4] = cart; // Wagen
-  return { ...s, cells: cellsCopy, _injectedValue: !!val, _prevValue: prevVal } as any;
+      const val = numberToValue[nr];
+      const ftl = numberToFTL[nr];
+      const cart = numberToCart[nr];
+      if (!val && !ftl && !cart) return s; // nichts zu tun
+      const cellsCopy = [...s.cells];
+      const prevVal = cellsCopy[2];
+      if (val) cellsCopy[2] = val; // Wert
+      if (ftl) cellsCopy[3] = ftl; // FTL.
+      if (cart) cellsCopy[4] = cart; // Wagen
+      return { ...s, cells: cellsCopy, _injectedValue: !!val, _prevValue: prevVal };
     });
     return base;
   }, [steps, selectedFormat, formats, formatDetail]);
 
   // --- RFID Assignments + Live Sichtbarkeit ---
-  const [assignments, setAssignments] = React.useState<Record<string, any>>({}); // format_part -> { rfid_tag_id }
+  const [assignments, setAssignments] = React.useState<AssignmentsMap>({}); // format_part -> { rfid_tag_id }
   const [liveEventTagIds, setLiveEventTagIds] = React.useState<Set<string>>(new Set());
   // Assignments nur beim (erstmaligen) Laden und wenn Format gewechselt wird holen (statt Dauer-Polling)
   useEffect(() => {
     let cancelled = false;
     const fetchOnce = async () => {
       try {
-        const json: any = await apiClient.getFormatAssignments();
-        if (!cancelled && json?.success) setAssignments(json.assignments || {});
+  const json = await apiClient.getFormatAssignments() as { success?: boolean; assignments?: AssignmentsMap };
+  if (!cancelled && json?.success && json.assignments) setAssignments(json.assignments);
       } catch {}
     };
     fetchOnce();
@@ -284,17 +327,19 @@ export default function CustomerPage() {
         const base = baseHttp.replace(/^http/, 'ws');
         const url = `${base}/ws/opc-ua`;
         ws = new WebSocket(url);
-        ws.onmessage = (ev) => {
+        ws.onmessage = (ev: MessageEvent) => {
           try {
-            const msg = JSON.parse(ev.data);
-            if (msg?.type === 'live_event_ids' && Array.isArray(msg.ids)) {
-              const norm = msg.ids.map((t: any) => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
+            const raw = JSON.parse(ev.data) as unknown;
+            if (typeof raw !== 'object' || raw === null) return;
+            const msg = raw as Record<string, unknown>;
+            if (msg.type === 'live_event_ids' && Array.isArray(msg.ids)) {
+              const norm = (msg.ids as unknown[]).map(t => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
               setLiveEventTagIds(new Set(norm));
-            } else if (msg?.type === 'assignments_update' && msg.assignments) {
-              setAssignments(msg.assignments);
-            } else if (msg?.type === 'rfid_inventory' && Array.isArray(msg.tags)) {
+            } else if (msg.type === 'assignments_update' && msg.assignments) {
+              setAssignments(msg.assignments as AssignmentsMap);
+            } else if (msg.type === 'rfid_inventory' && Array.isArray(msg.tags)) {
               // Fallback falls Backend (ältere Version) noch rfid_inventory sendet
-              const norm = msg.tags.map((t: any) => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
+              const norm = (msg.tags as unknown[]).map(t => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
               setLiveEventTagIds(new Set(norm));
             }
           } catch {}
@@ -307,27 +352,23 @@ export default function CustomerPage() {
   }, []);
 
   // Hilfsfunktion: aus Datenzeile (Nr. + FTL.) einen FormatPart-Key ableiten wie in Assignments (combinedPerFormat nutzt "<valueIndex> <part>")
-  const deriveFormatPartKey = (row: any): string | null => {
+  const deriveFormatPartKey = (row: Step): string | null => {
     if (!row || row.kind !== 'data') return null;
     const nrRaw = (row.cells?.[0] || '').toString().trim();
     const ftlRaw = (row.cells?.[3] || '').toString().trim();
     if (!nrRaw || !ftlRaw) return null;
-    // Normalisierung: Großschreibung, Punkte vereinheitlichen
-    const nr = nrRaw.replace(/[^0-9A-Za-z]+/g, '').toUpperCase();
-    // FTL Teile wie 01-01 sollen unverändert bleiben, aber führende/trailing spaces raus
-    const ftl = ftlRaw.replace(/\s+/g, ' ').trim();
     // Primärschlüssel wie gespeichert: "<sichtbare Zahl> <formatPart>" (Original: valueIndex + part)
     // Falls Original evtl. ohne Normalisierung gespeichert wurde, erzeugen wir mehrere Varianten beim Lookup.
     return `${nrRaw} ${ftlRaw}`.trim();
   };
 
   // Steps um Status-Spalte erweitern
-  const stepsWithStatus = React.useMemo(() => {
-    return enrichedSteps.map(s => {
+  const stepsWithStatus: Step[] = React.useMemo(() => {
+    return enrichedSteps.map<Step>(s => {
       if (s.kind !== 'data' || !s.cells.length) return s;
       const key = deriveFormatPartKey(s);
       if (!key) return s;
-      let assignment: any = assignments[key];
+      let assignment = assignments[key];
       if (!assignment) {
         const alt1 = key.replace(/\s+/g,' ').trim();
         assignment = assignments[alt1];
@@ -337,12 +378,14 @@ export default function CustomerPage() {
         assignment = assignments[alt2];
       }
       // assignment kann string oder objekt sein
-  const rawTagId = typeof assignment === 'string' ? assignment : (assignment?.rfid_tag_id || assignment?.rfidTagId);
-  const tagId = rawTagId ? rawTagId.toString().trim() : null;
-  const normTag = tagId ? tagId.toUpperCase() : null;
-  const seen = normTag ? liveEventTagIds.has(normTag) : false;
+      const rawTagId = typeof assignment === 'string'
+        ? assignment
+        : (assignment?.rfid_tag_id ?? (assignment as AssignmentsMapEntry | undefined)?.rfidTagId);
+      const tagId = rawTagId ? rawTagId.toString().trim() : null;
+      const normTag = tagId ? tagId.toUpperCase() : null;
+      const seen = normTag ? liveEventTagIds.has(normTag) : false;
       const symbol = tagId ? (seen ? '✔' : '✖') : '–';
-  return { ...s, _rfidStatus: { seen, tagId: tagId || null, tagIdNorm: normTag, keyTried: key, symbol } } as any;
+      return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
     });
   }, [enrichedSteps, assignments, liveEventTagIds]);
 
@@ -352,11 +395,11 @@ export default function CustomerPage() {
   // Statistiken zu Assignments & Erkennung
   const rfidStats = React.useMemo(() => {
     // Alle data-rows mit zugewiesenem Tag
-    const rowsWithTag = stepsWithStatus.filter(r => (r as any)._rfidStatus && (r as any)._rfidStatus.tagId);
+  const rowsWithTag = stepsWithStatus.filter(r => r._rfidStatus && r._rfidStatus.tagId);
     const assignedTotal = rowsWithTag.length;
-    const recognizedAssigned = rowsWithTag.filter(r => (r as any)._rfidStatus.seen).length;
+  const recognizedAssigned = rowsWithTag.filter(r => r._rfidStatus?.seen).length;
     // Menge aller zugewiesenen normierten Tags
-    const assignedNormSet = new Set(rowsWithTag.map(r => (r as any)._rfidStatus.tagIdNorm).filter(Boolean));
+  const assignedNormSet = new Set(rowsWithTag.map(r => r._rfidStatus?.tagIdNorm).filter(Boolean));
     // Fremde erkannte Tags = liveEventTagIds ohne zugewiesene
     let foreignCount = 0;
     liveEventTagIds.forEach(t => { if (!assignedNormSet.has(t)) foreignCount++; });
@@ -376,13 +419,23 @@ export default function CustomerPage() {
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: '100vh' }}>
       <Header profile="Customer" />
-      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%' }}>
-        <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa' }}>
-          <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
-          {stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Lade Schritte…</div>}
-          {stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
-          {!stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
-          {current && (
+      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%', display:'flex', flexDirection:'column' }}>
+        <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
+            <button onClick={()=>setShowSteps(s=>!s)} style={{ fontSize:'.65rem', padding:'4px 8px', border:'1px solid #bbb', background:'#fff', borderRadius:4, cursor:'pointer' }}>
+              {showSteps ? 'Ausblenden' : 'Anzeigen'}
+            </button>
+            {showSteps && (
+              <span style={{ marginLeft:'auto', fontSize:'.6rem', color:'#555' }}>
+                {rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} erkannt · {rfidStats.foreignCount} fremd
+              </span>
+            )}
+          </div>
+          {showSteps && stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Lade Schritte…</div>}
+          {showSteps && stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
+          {showSteps && !stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
+          {showSteps && current && (
             <div style={{ marginTop: 8, height: STEP_PANEL_HEIGHT, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative' }}>
                 <label style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
@@ -422,35 +475,35 @@ export default function CustomerPage() {
                           <col key={i} style={{ width: typeof w === 'number' ? `${w}px` : w }} />
                         ))}
                         {/* zusätzliche dynamische Status-Spalte falls nötig */}
-                        {(current as any)._rfidStatus && <col style={{ width: '6%' }} />}
+                        {current._rfidStatus && <col style={{ width: '6%' }} />}
                       </colgroup>
                     )}
                     <thead>
                       <tr>
-                        {current.headerCells.map((h: string, i: number) => {
+                        {current.headerCells.map((h: string) => {
                           const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
                           const width = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
                           return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width, color:'#222', fontSize: STEP_FONT_SIZE }}>{h}</th>;
                         })}
-                        {(current as any)._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
+                        {current._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
                         {current.cells.map((c: string, i: number) => {
                           const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                          const injected = (current as any)._injectedValue && i === 2; // Wert-Spalte
+                          const injected = current._injectedValue && i === 2; // Wert-Spalte
                           return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: injected ? '#fff9e6' : '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: injected ? 600 : 400, color: '#111' }}>{c}</td>;
                         })}
-                        {(current as any)._rfidStatus && (
+                        {current._rfidStatus && (
                           <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize: STEP_FONT_SIZE, fontWeight:700,
-                                       color: (current as any)._rfidStatus.tagId ? ((current as any)._rfidStatus.seen ? '#0a7a15' : '#b30000') : '#666' }}
-                              title={!(current as any)._rfidStatus.tagId
-                                ? `Kein RFID zugeordnet | Key=${(current as any)._rfidStatus.keyTried}`
-                                : ((current as any)._rfidStatus.seen
-                                  ? `Tag ${(current as any)._rfidStatus.tagId} erkannt | Key=${(current as any)._rfidStatus.keyTried} | Norm=${(current as any)._rfidStatus.tagIdNorm}`
-                                  : `Tag ${(current as any)._rfidStatus.tagId} nicht erkannt | Key=${(current as any)._rfidStatus.keyTried} | Norm=${(current as any)._rfidStatus.tagIdNorm}`)}>
-                            {(current as any)._rfidStatus.symbol}
+                                       color: current._rfidStatus.tagId ? (current._rfidStatus.seen ? '#0a7a15' : '#b30000') : '#666' }}
+                              title={!current._rfidStatus.tagId
+                                ? `Kein RFID zugeordnet | Key=${current._rfidStatus.keyTried}`
+                                : (current._rfidStatus.seen
+                                  ? `Tag ${current._rfidStatus.tagId} erkannt | Key=${current._rfidStatus.keyTried} | Norm=${current._rfidStatus.tagIdNorm}`
+                                  : `Tag ${current._rfidStatus.tagId} nicht erkannt | Key=${current._rfidStatus.keyTried} | Norm=${current._rfidStatus.tagIdNorm}`)}>
+                            {current._rfidStatus.symbol}
                           </td>
                         )}
                       </tr>
@@ -467,7 +520,7 @@ export default function CustomerPage() {
             </div>
           )}
         </div>
-        {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', height: '64%', border: 'none', background: '#fff', display: 'block' }} />}
+  {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', flex:1, border: 'none', background: '#fff', display: 'block', marginTop: showSteps ? 0 : 8 }} />}
       </main>
     </div>
   );

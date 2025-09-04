@@ -17,6 +17,7 @@ import json
 from opc_client import OPCUAManager
 from rfu_ivsingle_inventory import AsyncRFUInventoryClient, RFUInventoryError
 from format_parser import FormatDataManager
+from html_table_parser import MainTableRowExtractor
 from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
 from opc_event_bytes_listener import OPCUAEventBytesListener
@@ -121,6 +122,21 @@ class ConnectionManager:
         for conn in disconnected:
             self.disconnect(conn)
 
+    async def broadcast_json(self, payload: dict):
+        """Broadcast a raw JSON payload (already containing type field)."""
+        if not self.active_connections:
+            return
+        message = json.dumps(payload)
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Error sending WebSocket JSON message: {e}")
+                disconnected.append(connection)
+        for conn in disconnected:
+            self.disconnect(conn)
+
 # Global connection manager
 websocket_manager = ConnectionManager()
 
@@ -192,6 +208,22 @@ async def lifespan(app: FastAPI):
                         meta["count"] += 1
                     else:
                         _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
+                # Broadcast updated live_event_ids snapshot (pruned within a default window e.g. 8s)
+                try:
+                    cutoff = now_ts - 8.0
+                    to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
+                    for k in to_delete:
+                        _live_event_hex_ids.pop(k, None)
+                    ids = list(_live_event_hex_ids.keys())
+                    ids.sort(key=lambda x: _live_event_hex_ids[x]["last_seen"], reverse=True)
+                    await websocket_manager.broadcast_json({
+                        "type": "live_event_ids",
+                        "ids": ids,
+                        "count": len(ids),
+                        "timestamp": now_ts
+                    })
+                except Exception as be:  # noqa: BLE001
+                    logger.error(f"Broadcast live_event_ids failed: {be}")
 
         opc_event_listener.add_callback(_event_cb)
         await opc_event_listener.start()
@@ -461,6 +493,49 @@ async def get_customer_html():
         logger.error(f"Error reading HTML cache: {e}")
         raise HTTPException(status_code=500, detail="Error reading HTML cache")
 
+@app.get("/api/main-table-rows")
+async def get_main_table_rows(
+    as_html: bool = True,
+    strip_whitespace: bool = False,
+    with_meta: bool = False,
+    duplicate_caption: bool = False
+):
+    """Extract all <tr> rows from the cached <table class="main">.
+
+    Query Params:
+        as_html: Return raw HTML (default) or plain text.
+        strip_whitespace: Trim whitespace around HTML rows.
+        with_meta: Include class meta + flags (adds rowsMeta output format when true).
+        duplicate_caption: After every row with classes 'caption line' append all rows having only class 'caption'.
+    """
+    if not HTML_CACHE_PATH.exists():
+        raise HTTPException(status_code=404, detail="customer-html-cache.html not found. Upload a file first.")
+    try:
+        extractor = MainTableRowExtractor(str(HTML_CACHE_PATH))
+        rows = extractor.extract_rows(
+            as_html=as_html,
+            strip_whitespace=strip_whitespace,
+            with_meta=with_meta,
+            duplicate_caption=duplicate_caption
+        )
+        resp = {
+            "success": True,
+            "count": len(rows),
+            "as_html": as_html,
+            "with_meta": with_meta,
+            "duplicate_caption": duplicate_caption,
+        }
+        if with_meta:
+            resp["rowsMeta"] = rows
+        else:
+            resp["rows"] = rows
+        return resp
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="HTML cache file not found")
+    except Exception as e:
+        logger.exception("Error extracting main table rows: %s", e)
+        raise HTTPException(status_code=500, detail="Error extracting rows")
+
 @app.post("/api/customer-html")
 async def upload_customer_html(file: UploadFile = File(...)):
     """Upload and cache customer HTML"""
@@ -724,6 +799,8 @@ async def list_current_rfid_tag_ids_alias():
         "source": "db"
     }
 
+## Entferntes Alias: /api/live-event-ids wird weiter unten (Event-Bytes basierend) definiert.
+
 # Einfacher Status-Endpunkt für das direkte Inventory (Debug-Hilfe)
 @app.get("/api/rfid-inventory/status")
 async def rfid_inventory_status():
@@ -801,7 +878,29 @@ async def reconnect_opc_ua():
 async def websocket_opc_ua_updates(websocket: WebSocket):
     """WebSocket endpoint for OPC UA event updates"""
     await websocket_manager.connect(websocket)
-    
+    # Initial Snapshots: Assignments & Live Event IDs
+    try:
+        if assignment_manager:
+            assignments = await assignment_manager.get_all_assignments()
+            await websocket.send_text(json.dumps({
+                "type": "assignments_update",
+                "assignments": assignments,
+                "count": len(assignments),
+                "timestamp": time.time()
+            }))
+        # Live Event IDs snapshot
+        if _live_event_hex_ids:
+            now_ts = time.time()
+            ids_snapshot = list(_live_event_hex_ids.keys())
+            await websocket.send_text(json.dumps({
+                "type": "live_event_ids",
+                "ids": ids_snapshot,
+                "count": len(ids_snapshot),
+                "timestamp": now_ts
+            }))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error sending initial WS snapshot: {e}")
+
     try:
         while True:
             # Wait for a message from the client (optional, if you want to receive messages)
@@ -867,10 +966,18 @@ async def assign_rfid_to_format_part(assignment: FormatPartAssignmentRequest):
         )
         
         if success:
-            return FormatPartAssignmentResponse(
-                success=True,
-                message=f"Successfully assigned {assignment.rfid_tag_id} to {assignment.format_part}"
-            )
+            # Broadcast updated assignments snapshot
+            try:
+                assignments = await assignment_manager.get_all_assignments()
+                await websocket_manager.broadcast_json({
+                    "type": "assignments_update",
+                    "assignments": assignments,
+                    "count": len(assignments),
+                    "timestamp": time.time()
+                })
+            except Exception as be:  # noqa: BLE001
+                logger.error(f"Broadcast assignments failed: {be}")
+            return FormatPartAssignmentResponse(success=True, message=f"Successfully assigned {assignment.rfid_tag_id} to {assignment.format_part}")
         else:
             raise HTTPException(status_code=500, detail="Failed to create assignment")
             
@@ -888,6 +995,16 @@ async def unassign_rfid_from_format_part(format_part: str):
         success = await assignment_manager.unassign_rfid_from_part(format_part)
         
         if success:
+            try:
+                assignments = await assignment_manager.get_all_assignments()
+                await websocket_manager.broadcast_json({
+                    "type": "assignments_update",
+                    "assignments": assignments,
+                    "count": len(assignments),
+                    "timestamp": time.time()
+                })
+            except Exception as be:  # noqa: BLE001
+                logger.error(f"Broadcast assignments failed: {be}")
             return {"success": True, "message": f"Unassigned RFID from {format_part}"}
         else:
             raise HTTPException(status_code=404, detail="Assignment not found")

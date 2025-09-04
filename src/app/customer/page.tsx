@@ -21,6 +21,12 @@ export default function CustomerPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState<string | null>(null);
+  // Layout / Style Konstanten für den Step-Block
+  const STEP_PANEL_HEIGHT = 200; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
+  const STEP_FONT_SIZE = '.85rem'; // einheitliche Schriftgröße für alle Texte im Block
+  // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
+  // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
+  const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
   // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
   // Beim Laden die aktuelle Datei vom Server holen
@@ -54,26 +60,39 @@ export default function CustomerPage() {
   let currentLineHtml: string | undefined = undefined;   // letzte caption_line HTML (inkl. Bilder)
 
         // Helper: extrahiere aus einer <tr class=" line"> Zeile nur Pfeil + Text (2. Zelle) und forme sie zu einer flachen flex-Zeile
+        const normalizeImages = (html: string) => html
+          .replace(/<img([^>]*class="[^"]*icon[^"]*"[^>]*)>/gi, (_, attrs) => {
+            const cleaned = attrs.replace(/style="[^"]*"/gi, '');
+            return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
+          })
+          .replace(/<img(?![^>]*icon)([^>]*)>/gi, (_, attrs) => {
+            const cleaned = attrs.replace(/style="[^"]*"/gi, '');
+            return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
+          });
+
+        const extractCells = (rawTr: string): string[] => {
+          const matches = rawTr.match(/<td[^>]*>[\s\S]*?<\/td>/gi) || [];
+            return matches.map(td => {
+              const m = td.match(/<td[^>]*>([\s\S]*?)<\/td>/i);
+              return m ? m[1].trim() : '';
+            });
+        };
+
         const buildLineRowHtml = (raw: string | undefined): string | undefined => {
           if (!raw) return raw;
-            try {
-              const tdMatches = raw.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-              if (tdMatches && tdMatches.length >= 2) {
-                const inner = (td: string) => {
-                  const m = td.match(/<td[^>]*>([\s\S]*?)<\/td>/i);
-                  return m ? m[1].trim() : '';
-                };
-                const arrow = inner(tdMatches[0]);
-                let body = inner(tdMatches[1]);
-                // Whitespace reduzieren
-                body = body.replace(/\s+/g, ' ').trim();
-                return `<div style="display:flex;align-items:center;gap:8px;font-size:.8rem;color:#111;line-height:1.25;">`+
-                  `<span style=\"font-weight:600;\">${arrow}</span>`+
-                  `<span style=\"display:inline-flex;align-items:center;gap:6px;\">${body}</span>`+
-                `</div>`;
-              }
-            } catch { /* ignore */ }
-          return raw; // Fallback: original HTML
+          const cells = extractCells(raw);
+          if (cells.length < 2) return raw;
+          const arrow = '→';
+          let body = cells[1]
+            .replace(/<br\s*\/?>(\s)*/gi, ' · ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          body = normalizeImages(body);
+          return `<div style="display:flex;align-items:center;gap:10px;font-size:${STEP_FONT_SIZE};color:#111;line-height:1.3;font-weight:400;">`
+            + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
+            + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
+            + `</div>`;
         };
 
         rowsMeta.forEach((row: any, idx: number) => {
@@ -166,55 +185,54 @@ export default function CustomerPage() {
           {stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
           {!stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
           {current && (
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {current.kind === 'data' && (
-                  <div style={{ fontSize: '.75rem', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700, color: '#111', opacity: 0.9 }}>{current.section}</div>
-                )}
-                {current.kind === 'data' && current.subSection && (
-                  <div style={{ fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600, color: '#222' }}>{current.subSection}</div>
-                )}
-                {current.kind === 'line' && current.lineContentHtml && (
-                  <div style={{ marginTop: 0 }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
+            <div style={{ marginTop: 8, height: STEP_PANEL_HEIGHT, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {current.kind === 'data' && (
+                    <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 700, color: '#111', letterSpacing: '.06em', textTransform: 'uppercase' }}>{current.section}</div>
+                  )}
+                  {current.kind === 'data' && current.subSection && (
+                    <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222', letterSpacing: '.04em', textTransform: 'uppercase' }}>{current.subSection}</div>
+                  )}
+                  {current.kind === 'line' && current.lineContentHtml && (
+                    <div style={{ fontSize: STEP_FONT_SIZE }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
+                  )}
+                </div>
+                {current.kind === 'data' && current.headerCells && (
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: 'fixed' }}>
+                    {COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
+                      <colgroup>
+                        {COLUMN_WIDTHS.map((w, i) => (
+                          <col key={i} style={{ width: typeof w === 'number' ? `${w}px` : w }} />
+                        ))}
+                      </colgroup>
+                    )}
+                    <thead>
+                      <tr>
+                        {current.headerCells.map((h: string, i: number) => {
+                          const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
+                          const width = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
+                          return <th key={key} style={{ border: '1px solid #bbb', padding: '4px 6px', background: '#f0f0f0', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width }}>{h}</th>;
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {current.cells.map((c: string, i: number) => {
+                          const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
+                          return <td key={key} style={{ border: '1px solid #ccc', padding: '4px 6px', background: '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c}</td>;
+                        })}
+                      </tr>
+                    </tbody>
+                  </table>
                 )}
               </div>
-              {current.kind === 'data' && (
-                (() => {
-                  const columnWidths: string[] | null = null; // Beispiel: ['6%','34%','10%','8%','10%','32%']
-                  return (
-                    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '.75rem', color: '#111', tableLayout: 'fixed' }}>
-                      {current.headerCells && current.headerCells.length > 0 && (
-                        <thead>
-                          <tr>
-                            {current.headerCells.map((h: string, i: number) => {
-                              const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
-                              const colCount = current.headerCells?.length || 1;
-                              const width = columnWidths ? columnWidths[i] : `${100 / colCount}%`;
-                              return <th key={key} style={{ border: '1px solid #bbb', padding: '4px 6px', background: '#f0f0f0', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width }}>{h}</th>;
-                            })}
-                          </tr>
-                        </thead>
-                      )}
-                      <tbody>
-                        <tr>
-                          {current.cells.map((c: string, i: number) => {
-                            const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                            const colCount = current.headerCells?.length || current.cells.length || 1;
-                            const width = columnWidths ? columnWidths[i] : `${100 / colCount}%`;
-                            return <td key={key} style={{ border: '1px solid #ccc', padding: '4px 6px', background: '#fff', fontSize: '.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width }}>{c}</td>;
-                          })}
-                        </tr>
-                      </tbody>
-                    </table>
-                  );
-                })()
-              )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '4px 10px', fontSize: '.75rem', background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
-                <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '4px 10px', fontSize: '.75rem', background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
-                <div style={{ fontSize: '.65rem', color: '#111', marginLeft: 'auto' }}>Schritt {currentStep + 1} / {steps.length}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
+                <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
+                <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {steps.length}</div>
               </div>
-              <input type="range" min={0} max={Math.max(steps.length - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%' }} />
+              <input type="range" min={0} max={Math.max(steps.length - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%', marginTop: 6 }} />
             </div>
           )}
         </div>

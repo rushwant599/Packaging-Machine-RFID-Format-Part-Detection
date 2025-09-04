@@ -349,6 +349,20 @@ export default function CustomerPage() {
   const current = stepsWithStatus[currentStep];
   const totalSteps = stepsWithStatus.length;
 
+  // Statistiken zu Assignments & Erkennung
+  const rfidStats = React.useMemo(() => {
+    // Alle data-rows mit zugewiesenem Tag
+    const rowsWithTag = stepsWithStatus.filter(r => (r as any)._rfidStatus && (r as any)._rfidStatus.tagId);
+    const assignedTotal = rowsWithTag.length;
+    const recognizedAssigned = rowsWithTag.filter(r => (r as any)._rfidStatus.seen).length;
+    // Menge aller zugewiesenen normierten Tags
+    const assignedNormSet = new Set(rowsWithTag.map(r => (r as any)._rfidStatus.tagIdNorm).filter(Boolean));
+    // Fremde erkannte Tags = liveEventTagIds ohne zugewiesene
+    let foreignCount = 0;
+    liveEventTagIds.forEach(t => { if (!assignedNormSet.has(t)) foreignCount++; });
+    return { assignedTotal, recognizedAssigned, foreignCount };
+  }, [stepsWithStatus, liveEventTagIds]);
+
   const hasPrev = currentStep > 0;
   const hasNext = currentStep < totalSteps - 1;
   const goto = useCallback((delta: number) => {
@@ -370,7 +384,7 @@ export default function CustomerPage() {
           {!stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
           {current && (
             <div style={{ marginTop: 8, height: STEP_PANEL_HEIGHT, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4 }}>
+              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative' }}>
                 <label style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
                 <select
                   value={selectedFormat || ''}
@@ -383,6 +397,10 @@ export default function CustomerPage() {
                 {formatLoading && <span style={{ fontSize: '.65rem', color:'#444' }}>lädt…</span>}
                 {formatError && <span style={{ fontSize: '.65rem', color:'#b00' }}>{formatError}</span>}
                 {selectedFormat && <button title="Format zurücksetzen" onClick={()=>setSelectedFormat(null)} style={{ fontSize: '.65rem', padding:'4px 6px', background:'#f4f4f4', color:'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>Reset</button>}
+                <div style={{ marginLeft:'auto', display:'flex', gap:14, alignItems:'center', fontSize:'.65rem', fontWeight:600, color:'#222', flexWrap:'wrap' }}>
+                  <span title="Erkannte vs. zugeordnete Formatteile">{rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} Formatteile erkannt</span>
+                  <span title="Erkannte Tags ohne Zuweisung" style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} falsche Formatteile erkannt</span>
+                </div>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

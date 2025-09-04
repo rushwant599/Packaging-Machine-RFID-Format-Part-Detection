@@ -21,9 +21,15 @@ export default function CustomerPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState<string | null>(null);
+  // Format Auswahl
+  const [formats, setFormats] = useState<Record<string, any>>({});
+  const [formatNames, setFormatNames] = useState<string[]>([]);
+  const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
+  const [formatLoading, setFormatLoading] = useState(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
   // Layout / Style Konstanten für den Step-Block
-  const STEP_PANEL_HEIGHT = 200; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
-  const STEP_FONT_SIZE = '.85rem'; // einheitliche Schriftgröße für alle Texte im Block
+  const STEP_PANEL_HEIGHT = 250; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
+  const STEP_FONT_SIZE = '.95rem'; // etwas größer für bessere Lesbarkeit
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
   const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
@@ -164,9 +170,97 @@ export default function CustomerPage() {
     loadSteps();
   }, []);
 
-  const current = steps[currentStep];
+  // Formate laden
+  useEffect(() => {
+    const loadFormats = async () => {
+      setFormatLoading(true); setFormatError(null);
+      try {
+  // Verwende Backend API Client (verhindert 404 auf Next.js eigener /api Route)
+  const json: any = await apiClient.getFormats();
+  const fmts = json.formats || {};
+        setFormats(fmts);
+        setFormatNames(Object.keys(fmts));
+      } catch (e: any) {
+        setFormatError(e.message || 'Unbekannter Fehler');
+      } finally { setFormatLoading(false); }
+    };
+    loadFormats();
+  }, []);
+
+  // Format-Detaildaten (inkl. valueIndexMap) laden sobald ein Format gewählt ist
+  const [formatDetail, setFormatDetail] = React.useState<any | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadDetail = async () => {
+      if (!selectedFormat) { setFormatDetail(null); return; }
+      try {
+        const detail: any = await apiClient.getFormatData();
+        // detail.data.formats enthält alle Formate; wir filtern das ausgewählte heraus
+        if (!cancelled && detail && detail.success && detail.data) {
+          setFormatDetail(detail.data);
+        }
+      } catch (e) {
+        if (!cancelled) setFormatDetail(null);
+      }
+    };
+    loadDetail();
+    return () => { cancelled = true; };
+  }, [selectedFormat]);
+
+  // Werte aus gewähltem Format in Steps projizieren (nutzt valueIndexMap + items)
+  const enrichedSteps = React.useMemo(() => {
+    if (!selectedFormat || !formats[selectedFormat]) return steps;
+    const fmt = formats[selectedFormat];
+    const allFormatsFromDetail = formatDetail?.formats || {};
+    const detailFmt = allFormatsFromDetail[selectedFormat] || fmt; // Fallback auf einfache Formats-Struktur
+    const dataItems: any[] = Array.isArray(detailFmt?.data) ? detailFmt.data : [];
+    const valueIndexMap: Record<number, string> = (formatDetail?.valueIndexMap) || {};
+
+    // Map sichtbare Nummer -> Wert (value), FTL. (formatPart) und Wagen (cart)
+    const numberToValue: Record<string, string> = {};
+    const numberToFTL:   Record<string, string> = {};
+    const numberToCart:  Record<string, string> = {};
+    dataItems.forEach((it, idx) => {
+      if (!it || typeof it !== 'object') return;
+      // idx entspricht Position im data Array; valueIndexMap keys sind 1-basiert laut Parser
+      const dataPos = idx; // 0-basiert
+      const visible = (it.valueIndex) || valueIndexMap[dataPos] || valueIndexMap[dataPos + 1] || ''; // Versuch verschiedene Offsets
+      const rawVal = it.value ?? it.formatValue ?? '';
+      const val = (rawVal || '').toString().trim();
+      const ftl = (it.formatPart || '').toString().trim();
+      const cart = (it.cart || '').toString().trim();
+  // Ersten Dummy/Platzhalter-Datensatz (Header repliziert im Daten-Array) ignorieren:
+  const isPlaceholder = val.toLowerCase() === 'wert' && (ftl.toLowerCase() === 'ftl.' || ftl.toLowerCase() === 'ftl') && cart.toLowerCase() === 'wagen';
+  if (isPlaceholder) return;
+      if (visible) {
+        if (val && !numberToValue[visible]) numberToValue[visible] = val;
+        if (ftl && !numberToFTL[visible]) numberToFTL[visible] = ftl;
+        if (cart && !numberToCart[visible]) numberToCart[visible] = cart;
+      }
+    });
+
+    return steps.map(s => {
+      if (s.kind !== 'data' || !s.cells.length) return s;
+      const nr = (s.cells[0] || '').toString().trim();
+      if (!nr) return s;
+  const val = numberToValue[nr];
+  const ftl = numberToFTL[nr];
+  const cart = numberToCart[nr];
+  if (!val && !ftl && !cart) return s; // nichts zu tun
+  const cellsCopy = [...s.cells];
+  const prevVal = cellsCopy[2];
+  if (val) cellsCopy[2] = val; // Wert
+  if (ftl) cellsCopy[3] = ftl; // FTL.
+  if (cart) cellsCopy[4] = cart; // Wagen
+  return { ...s, cells: cellsCopy, _injectedValue: !!val, _prevValue: prevVal } as any;
+    });
+  }, [steps, selectedFormat, formats, formatDetail]);
+
+  const current = enrichedSteps[currentStep];
+  const totalSteps = enrichedSteps.length;
+
   const hasPrev = currentStep > 0;
-  const hasNext = currentStep < steps.length - 1;
+  const hasNext = currentStep < totalSteps - 1;
   const goto = useCallback((delta: number) => {
     setCurrentStep(s => {
       const next = s + delta;
@@ -186,6 +280,20 @@ export default function CustomerPage() {
           {!stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
           {current && (
             <div style={{ marginTop: 8, height: STEP_PANEL_HEIGHT, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4 }}>
+                <label style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
+                <select
+                  value={selectedFormat || ''}
+                  onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
+                  style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}
+                >
+                  <option value=''>-- wählen --</option>
+                  {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                {formatLoading && <span style={{ fontSize: '.65rem', color:'#444' }}>lädt…</span>}
+                {formatError && <span style={{ fontSize: '.65rem', color:'#b00' }}>{formatError}</span>}
+                {selectedFormat && <button title="Format zurücksetzen" onClick={()=>setSelectedFormat(null)} style={{ fontSize: '.65rem', padding:'4px 6px', background:'#f4f4f4', color:'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>Reset</button>}
+              </div>
               <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {current.kind === 'data' && (
@@ -212,7 +320,7 @@ export default function CustomerPage() {
                         {current.headerCells.map((h: string, i: number) => {
                           const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
                           const width = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
-                          return <th key={key} style={{ border: '1px solid #bbb', padding: '4px 6px', background: '#f0f0f0', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width }}>{h}</th>;
+                          return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width, color:'#222', fontSize: STEP_FONT_SIZE }}>{h}</th>;
                         })}
                       </tr>
                     </thead>
@@ -220,7 +328,8 @@ export default function CustomerPage() {
                       <tr>
                         {current.cells.map((c: string, i: number) => {
                           const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                          return <td key={key} style={{ border: '1px solid #ccc', padding: '4px 6px', background: '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c}</td>;
+                          const injected = (current as any)._injectedValue && i === 2; // Wert-Spalte
+                          return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: injected ? '#fff9e6' : '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: injected ? 600 : 400, color: '#111' }}>{c}</td>;
                         })}
                       </tr>
                     </tbody>
@@ -230,9 +339,9 @@ export default function CustomerPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
                 <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
-                <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {steps.length}</div>
+                <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {totalSteps}</div>
               </div>
-              <input type="range" min={0} max={Math.max(steps.length - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%', marginTop: 6 }} />
+              <input type="range" min={0} max={Math.max(totalSteps - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%', marginTop: 6 }} />
             </div>
           )}
         </div>

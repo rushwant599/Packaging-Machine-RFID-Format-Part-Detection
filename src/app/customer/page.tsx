@@ -33,6 +33,8 @@ export default function CustomerPage() {
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
   const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
+  // RFID Status: zusätzliche (optionale) Spalte ganz rechts
+  const STATUS_COL_TITLE = 'RFID';
   // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
   // Beim Laden die aktuelle Datei vom Server holen
@@ -239,7 +241,7 @@ export default function CustomerPage() {
       }
     });
 
-    return steps.map(s => {
+    const base = steps.map(s => {
       if (s.kind !== 'data' || !s.cells.length) return s;
       const nr = (s.cells[0] || '').toString().trim();
       if (!nr) return s;
@@ -254,10 +256,99 @@ export default function CustomerPage() {
   if (cart) cellsCopy[4] = cart; // Wagen
   return { ...s, cells: cellsCopy, _injectedValue: !!val, _prevValue: prevVal } as any;
     });
+    return base;
   }, [steps, selectedFormat, formats, formatDetail]);
 
-  const current = enrichedSteps[currentStep];
-  const totalSteps = enrichedSteps.length;
+  // --- RFID Assignments + Live Sichtbarkeit ---
+  const [assignments, setAssignments] = React.useState<Record<string, any>>({}); // format_part -> { rfid_tag_id }
+  const [liveEventTagIds, setLiveEventTagIds] = React.useState<Set<string>>(new Set());
+  // Poll assignments einmalig + alle 30s
+  useEffect(() => {
+    let stopped = false;
+    const loadAssignments = async () => {
+      try {
+        const json: any = await apiClient.getFormatAssignments();
+        if (!stopped && json && json.success) setAssignments(json.assignments || {});
+      } catch {}
+    };
+    loadAssignments();
+    const iv = setInterval(loadAssignments, 30000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, []);
+  // WebSocket für Live-Event-IDs + Assignments Updates
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let closed = false;
+    const connect = () => {
+      try {
+        const baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+        const base = baseHttp.replace(/^http/, 'ws');
+        const url = `${base}/ws/opc-ua`;
+        ws = new WebSocket(url);
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg?.type === 'live_event_ids' && Array.isArray(msg.ids)) {
+              const norm = msg.ids.map((t: any) => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
+              setLiveEventTagIds(new Set(norm));
+            } else if (msg?.type === 'assignments_update' && msg.assignments) {
+              setAssignments(msg.assignments);
+            } else if (msg?.type === 'rfid_inventory' && Array.isArray(msg.tags)) {
+              // Fallback falls Backend (ältere Version) noch rfid_inventory sendet
+              const norm = msg.tags.map((t: any) => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
+              setLiveEventTagIds(new Set(norm));
+            }
+          } catch {}
+        };
+        ws.onclose = () => { if (!closed) setTimeout(connect, 2000); };
+      } catch {}
+    };
+    connect();
+    return () => { closed = true; if (ws) ws.close(); };
+  }, []);
+
+  // Hilfsfunktion: aus Datenzeile (Nr. + FTL.) einen FormatPart-Key ableiten wie in Assignments (combinedPerFormat nutzt "<valueIndex> <part>")
+  const deriveFormatPartKey = (row: any): string | null => {
+    if (!row || row.kind !== 'data') return null;
+    const nrRaw = (row.cells?.[0] || '').toString().trim();
+    const ftlRaw = (row.cells?.[3] || '').toString().trim();
+    if (!nrRaw || !ftlRaw) return null;
+    // Normalisierung: Großschreibung, Punkte vereinheitlichen
+    const nr = nrRaw.replace(/[^0-9A-Za-z]+/g, '').toUpperCase();
+    // FTL Teile wie 01-01 sollen unverändert bleiben, aber führende/trailing spaces raus
+    const ftl = ftlRaw.replace(/\s+/g, ' ').trim();
+    // Primärschlüssel wie gespeichert: "<sichtbare Zahl> <formatPart>" (Original: valueIndex + part)
+    // Falls Original evtl. ohne Normalisierung gespeichert wurde, erzeugen wir mehrere Varianten beim Lookup.
+    return `${nrRaw} ${ftlRaw}`.trim();
+  };
+
+  // Steps um Status-Spalte erweitern
+  const stepsWithStatus = React.useMemo(() => {
+    return enrichedSteps.map(s => {
+      if (s.kind !== 'data' || !s.cells.length) return s;
+      const key = deriveFormatPartKey(s);
+      if (!key) return s;
+      let assignment: any = assignments[key];
+      if (!assignment) {
+        const alt1 = key.replace(/\s+/g,' ').trim();
+        assignment = assignments[alt1];
+      }
+      if (!assignment) {
+        const alt2 = key.replace(/\./g,'').replace(/\s+/g,' ').trim();
+        assignment = assignments[alt2];
+      }
+      // assignment kann string oder objekt sein
+  const rawTagId = typeof assignment === 'string' ? assignment : (assignment?.rfid_tag_id || assignment?.rfidTagId);
+  const tagId = rawTagId ? rawTagId.toString().trim() : null;
+  const normTag = tagId ? tagId.toUpperCase() : null;
+  const seen = normTag ? liveEventTagIds.has(normTag) : false;
+      const symbol = tagId ? (seen ? '✔' : '✖') : '–';
+  return { ...s, _rfidStatus: { seen, tagId: tagId || null, tagIdNorm: normTag, keyTried: key, symbol } } as any;
+    });
+  }, [enrichedSteps, assignments, liveEventTagIds]);
+
+  const current = stepsWithStatus[currentStep];
+  const totalSteps = stepsWithStatus.length;
 
   const hasPrev = currentStep > 0;
   const hasNext = currentStep < totalSteps - 1;
@@ -313,6 +404,8 @@ export default function CustomerPage() {
                         {COLUMN_WIDTHS.map((w, i) => (
                           <col key={i} style={{ width: typeof w === 'number' ? `${w}px` : w }} />
                         ))}
+                        {/* zusätzliche dynamische Status-Spalte falls nötig */}
+                        {(current as any)._rfidStatus && <col style={{ width: '6%' }} />}
                       </colgroup>
                     )}
                     <thead>
@@ -322,6 +415,7 @@ export default function CustomerPage() {
                           const width = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
                           return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width, color:'#222', fontSize: STEP_FONT_SIZE }}>{h}</th>;
                         })}
+                        {(current as any)._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -331,6 +425,17 @@ export default function CustomerPage() {
                           const injected = (current as any)._injectedValue && i === 2; // Wert-Spalte
                           return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: injected ? '#fff9e6' : '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: injected ? 600 : 400, color: '#111' }}>{c}</td>;
                         })}
+                        {(current as any)._rfidStatus && (
+                          <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize: STEP_FONT_SIZE, fontWeight:700,
+                                       color: (current as any)._rfidStatus.tagId ? ((current as any)._rfidStatus.seen ? '#0a7a15' : '#b30000') : '#666' }}
+                              title={!(current as any)._rfidStatus.tagId
+                                ? `Kein RFID zugeordnet | Key=${(current as any)._rfidStatus.keyTried}`
+                                : ((current as any)._rfidStatus.seen
+                                  ? `Tag ${(current as any)._rfidStatus.tagId} erkannt | Key=${(current as any)._rfidStatus.keyTried} | Norm=${(current as any)._rfidStatus.tagIdNorm}`
+                                  : `Tag ${(current as any)._rfidStatus.tagId} nicht erkannt | Key=${(current as any)._rfidStatus.keyTried} | Norm=${(current as any)._rfidStatus.tagIdNorm}`)}>
+                            {(current as any)._rfidStatus.symbol}
+                          </td>
+                        )}
                       </tr>
                     </tbody>
                   </table>
@@ -345,7 +450,7 @@ export default function CustomerPage() {
             </div>
           )}
         </div>
-        {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', height: '100%', border: 'none', background: '#fff', display: 'block' }} />}
+        {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', height: '64%', border: 'none', background: '#fff', display: 'block' }} />}
       </main>
     </div>
   );

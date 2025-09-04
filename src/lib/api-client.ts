@@ -50,7 +50,7 @@ export interface OPCUAValueResponse {
 }
 
 class APIClient {
-  private baseURL: string;
+  private readonly baseURL: string;
 
   constructor(baseURL: string = BACKEND_URL) {
     this.baseURL = baseURL;
@@ -148,6 +148,31 @@ class APIClient {
 
   async getFormatPartsPerFormat() {
     return this.request('/api/format-parts-per-format');
+  }
+
+  // Format part assignments
+  async getFormatAssignments() {
+    return this.request('/api/format-assignments');
+  }
+  async getFormatAssignment(formatPart: string) {
+    return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`);
+  }
+  async assignRFIDToFormatPart(formatPart: string, rfidTagId: string) {
+    return this.request('/api/format-assignments', {
+      method: 'POST',
+      body: JSON.stringify({ format_part: formatPart, rfid_tag_id: rfidTagId })
+    });
+  }
+  async unassignRFIDFromFormatPart(formatPart: string) {
+    return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`, { method: 'DELETE' });
+  }
+
+  // Live current tag IDs (recently seen)
+  async getCurrentRFIDTagIds() {
+    return this.request('/api/current-rfid-tag-ids');
+  }
+  async getLiveEventIds() {
+    return this.request('/api/live-event-ids');
   }
 
   // OPC UA methods

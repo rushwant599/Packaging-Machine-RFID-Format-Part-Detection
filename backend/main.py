@@ -339,23 +339,77 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RFID Parts Backend", version="1.0.0", lifespan=lifespan)
 
-# Configure CORS to allow requests from your Next.js frontend
+import socket
+
+def _collect_local_ips():
+    ips = set()
+    try:
+        hostname = socket.gethostname()
+        # Primäre Host-IP
+        ip = socket.gethostbyname(hostname)
+        if ip and ip != "127.0.0.1":
+            ips.add(ip)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Host IP detection failed: %s", e)
+    # Zusätzliche heuristik: Docker default gateway häufig 172.17.0.1
+    possible = ["172.17.0.1", os.getenv("HOST_IP", "")]  # HOST_IP optional vom Deployment mitgeben
+    for p in possible:
+        if p and p.count('.') == 3:
+            ips.add(p)
+    return list(ips)
+
+_default_cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:3001",
+]
+
+extra_env = os.getenv("CORS_EXTRA_ORIGINS", "")
+extra_origins = [o.strip() for o in extra_env.split(',') if o.strip()]
+
+origins = list(dict.fromkeys(_default_cors_origins + extra_origins))  # de-dupe preserving order
+
+if os.getenv("CORS_INCLUDE_LOCAL_IP", "true").lower() == "true":
+    for ip in _collect_local_ips():
+        for port in (3000, 3001):
+            origins.append(f"http://{ip}:{port}")
+
+# De-duplicate after adding IPs
+origins = list(dict.fromkeys(origins))
+
+# Private Netze standardmäßig erlauben (falls nicht explizit deaktiviert)
+allow_private_regex = r"^http://(?:(?:localhost)|(?:127\.0\.0\.1)|(?:10(?:\.\d{1,3}){3})|(?:192\.168(?:\.\d{1,3}){2})|(?:172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})):30(?:00|01)$"
+if os.getenv("CORS_ALLOW_PRIVATE_RANGES", "true").lower() in ("0","false","no"):
+    allow_private_regex = None
+    logger.info("CORS private range regex disabled by env")
+else:
+    logger.info("CORS private range regex enabled (covers 10.x.x.x / 192.168.x.x / 172.16-31.x.x)")
+
+logger.info("CORS allow_origins: %s", origins)
+if allow_private_regex:
+    logger.info("CORS allow_origin_regex: %s", allow_private_regex)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000", 
-        "http://localhost:3001", 
-        "http://127.0.0.1:3001",
-        "http://0.0.0.0:3000",
-        "http://localhost:8001", 
-        "http://0.0.0.0:8001",
-        "http://0.0.0.0:3001"
-    ],  # Next.js ports
+    allow_origins=origins,
+    allow_origin_regex=allow_private_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Debug Middleware um CORS-Probleme (400) zu analysieren
+@app.middleware("http")
+async def _cors_debug_logger(request, call_next):  # noqa: D401
+    if request.method == "OPTIONS":
+        origin = request.headers.get("origin")
+        acrm = request.headers.get("access-control-request-method")
+        headers_list = {k.lower(): v for k, v in request.headers.items() if k.lower().startswith("access-control")}
+        logger.info("CORS DEBUG OPTIONS path=%s origin=%s acrm=%s headers=%s", request.url.path, origin, acrm, headers_list)
+    return await call_next(request)
+# -------------------------------------------------------------------------------
 
 # Path to store HTML cache (same as your Next.js app)
 CACHE_DIR = Path(__file__).parent.parent
@@ -1083,16 +1137,84 @@ async def update_config(update: ConfigUpdate):
     
     return config
 
-app.mount("/pictures", StaticFiles(directory="pictures"), name="pictures")
-@app.get("/api/pictures")
-def list_pictures():
-    folder = Path(r"C:\Users\m.zink\OneDrive - Somic Verwaltungs GmbH\Desktop 1\Format-RFIDParts\pictures")
+
+PICTURES_ENV_OVERRIDE = os.getenv("PICTURES_DIR", "").strip()
+_pictures_static_mounted = False
+
+DATA_DIR = (Path(__file__).parent.parent / "data").resolve()
+PICTURES_DIR = (
+    Path(PICTURES_ENV_OVERRIDE).expanduser().resolve()
+    if PICTURES_ENV_OVERRIDE
+    else (DATA_DIR / os.getenv("PICTURES_SUBDIR", "pictures"))
+).resolve()
+
+def _ensure_pictures_dir() -> bool:
     try:
-        files = os.listdir(folder)
-        return JSONResponse(files)
-    except Exception as e:
-        logger.error(f"Error retrieving pictures: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving pictures")
+        PICTURES_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to ensure pictures directory %s: %s", PICTURES_DIR, e)
+        return False
+
+def _mount_pictures_static() -> None:
+    """Mount /pictures static route if directory is available and not yet mounted."""
+    global _pictures_static_mounted
+    if _pictures_static_mounted:
+        return
+    if not PICTURES_DIR.exists():
+        if not _ensure_pictures_dir():
+            logger.warning("/pictures static not mounted (directory unavailable): %s", PICTURES_DIR)
+            return
+    try:
+        app.mount("/pictures", StaticFiles(directory=str(PICTURES_DIR)), name="pictures")
+        _pictures_static_mounted = True
+        logger.info("Mounted /pictures static directory: %s", PICTURES_DIR)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to mount /pictures static directory %s: %s", PICTURES_DIR, e)
+
+# Initial attempt at import time
+_mount_pictures_static()
+
+@app.get("/api/pictures")
+def list_pictures(include_meta: bool = False):
+    """List files in the persistent pictures directory.
+
+    Query Params:
+        include_meta: If true, return size & modified timestamp per file.
+    Auto-heals: If directory was removed after startup, attempts recreation.
+    """
+    try:
+        if not PICTURES_DIR.exists():
+            if not _ensure_pictures_dir():
+                return JSONResponse({"success": False, "files": [], "count": 0, "message": "pictures directory unavailable"})
+            # Try (re)mount if we just re-created it
+            _mount_pictures_static()
+        entries = []
+        for name in sorted(os.listdir(PICTURES_DIR)):
+            if name.startswith('.'):
+                continue
+            full = PICTURES_DIR / name
+            if not full.is_file():
+                continue
+            if include_meta:
+                stat = full.stat()
+                entries.append({
+                    "name": name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime
+                })
+            else:
+                entries.append(name)
+        return JSONResponse({
+            "success": True,
+            "files": entries,
+            "count": len(entries),
+            "directory": str(PICTURES_DIR),
+            "mounted": _pictures_static_mounted
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error retrieving pictures list (%s): %s", PICTURES_DIR, e)
+        raise HTTPException(status_code=500, detail="Error retrieving pictures list")
 
 async def handle_direct_rfid_inventory_config_change(config):
     """Start/stop/restart des direkten RFID Inventory Pollings je nach Config.

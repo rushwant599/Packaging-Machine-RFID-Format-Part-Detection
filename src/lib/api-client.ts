@@ -1,5 +1,21 @@
 // API client for Python backend
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+// Problem bisher: Bei Zugriff von einem anderen Gerät im LAN zeigt 'localhost:8001' auf das dortige Gerät statt auf den Server.
+// Lösung: Falls NEXT_PUBLIC_BACKEND_URL nicht gesetzt ist, dynamisch die Host-IP/Domain des Frontends nutzen.
+// Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
+let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
+const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+if (!resolvedBase && typeof window !== 'undefined') {
+  const { protocol, hostname } = window.location;
+  resolvedBase = `${protocol}//${hostname}:${backendPort}`;
+}
+// Fallback (Dev Einzelstart): localhost
+const BACKEND_URL = resolvedBase || 'http://localhost:8001';
+// Optional: kurze Debug-Ausgabe einmalig
+if (typeof window !== 'undefined' && !(window as any).__BACKEND_URL_LOGGED__) {
+  (window as any).__BACKEND_URL_LOGGED__ = true;
+  // eslint-disable-next-line no-console
+  console.log('[api-client] BACKEND_URL =', BACKEND_URL);
+}
 
 export interface RFIDData {
   tag_id: string;

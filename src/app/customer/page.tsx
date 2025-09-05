@@ -56,11 +56,130 @@ interface Step extends StepBase {
   _rfidStatus?: RFIDStatus;
 }
 
+// ---------- Responsive Utilities ----------
+function useViewport() {
+  const [width, setWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1920);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return { width, isMobile: width < 640, isTablet: width >= 640 && width < 1024 };
+}
+
+// ---------- HTML parsing helpers (extracted to reduce cognitive complexity) ----------
+const ICON_IMG_REGEX = /<img([^>]*class="[^"]*icon[^"]*"[^>]*)>/gi;
+const GENERIC_IMG_REGEX = /<img(?![^>]*icon)([^>]*)>/gi;
+const TD_CELL_REGEX_GLOBAL = /<td[^>]*>[\s\S]*?<\/td>/gi;
+const TD_CELL_REGEX_SINGLE = /<td[^>]*>([\s\S]*?)<\/td>/i;
+
+function normalizeImagesBlock(html: string, fontSize: string) {
+  return html
+    .replace(ICON_IMG_REGEX, (_, attrs) => {
+      const cleaned = attrs.replace(/style="[^"]*"/gi, '');
+      return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
+    })
+    .replace(GENERIC_IMG_REGEX, (_, attrs) => {
+      const cleaned = attrs.replace(/style="[^"]*"/gi, '');
+      return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
+    });
+}
+
+function extractCells(rawTr: string): string[] {
+  const matches = rawTr.match(TD_CELL_REGEX_GLOBAL) || [];
+  return matches.map(td => {
+    const m = TD_CELL_REGEX_SINGLE.exec(td);
+    return m ? m[1].trim() : '';
+  });
+}
+
+function buildLineRowHtml(raw: string | undefined, fontSize: string): string | undefined {
+  if (!raw) return raw;
+  const cells = extractCells(raw);
+  if (cells.length < 2) return raw;
+  const arrow = '→';
+  let body = cells[1]
+    .replace(/<br\s*\/?>/gi, ' · ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  body = normalizeImagesBlock(body, fontSize);
+  return `<div style="display:flex;align-items:center;gap:10px;font-size:${fontSize};color:#111;line-height:1.3;font-weight:400;">`
+    + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
+    + `<span style=\"display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;\">${body}</span>`
+    + `</div>`;
+}
+
+function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
+  const prepared: Step[] = [];
+  let currentSection: string | null = null;
+  let currentHeaderCells: string[] | undefined; // persistent header
+  let currentSubSection: string | null = null;
+  let currentLineHtml: string | undefined;
+  rowsMeta.forEach((row: RowMeta, idx: number) => {
+    const text = (row?.text || '').trim();
+    if (!text) return;
+    switch (row.row_type) {
+      case 'caption_line':
+        currentSection = text;
+        currentSubSection = null;
+        currentLineHtml = row.html || undefined;
+        return;
+      case 'caption': {
+        if (row.cells && row.cells.length > 3) {
+          const first = (row.cells[0] || '').toString().toLowerCase();
+          const second = (row.cells[1] || '').toString().toLowerCase();
+          const looksLikeHeader = (first.startsWith('nr') || first === 'nr.') && second.includes('umstell');
+          if (looksLikeHeader) {
+            currentHeaderCells = row.cells;
+            return;
+          }
+        }
+        currentHeaderCells = row.cells?.length ? row.cells : currentHeaderCells;
+        currentSubSection = text;
+        return;
+      }
+      case 'data': {
+        if (Array.isArray(row.classes) && row.classes.includes('line') && !row.classes.includes('caption')) {
+          const sectionName = currentSection || 'Allgemeine Vorbereitung';
+          prepared.push({
+            index: idx,
+            section: sectionName,
+            subSection: undefined,
+            headerCells: undefined,
+            cells: [],
+            lineHtml: currentLineHtml,
+            kind: 'line',
+            lineContentHtml: buildLineRowHtml(row.html || undefined, fontSize),
+          });
+          return;
+        }
+        if (!currentSection) return;
+        prepared.push({
+          index: idx,
+            section: currentSection,
+            subSection: currentSubSection || undefined,
+            headerCells: currentHeaderCells,
+            cells: row.cells || [],
+            lineHtml: currentLineHtml,
+            kind: 'data'
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  });
+  return prepared;
+}
+
 export default function CustomerPage() {
+  const { isMobile, isTablet } = useViewport();
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
-  const [showSteps, setShowSteps] = useState(true);
+  // Anleitung standardmäßig ausgeblendet
+  const [showSteps, setShowSteps] = useState(false);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState<string | null>(null);
   // Format Auswahl
@@ -69,9 +188,8 @@ export default function CustomerPage() {
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
-  // Layout / Style Konstanten für den Step-Block
-  const STEP_PANEL_HEIGHT = 220; // px feste Höhe für den gesamten Schrittbereich (Inhalt + Navigation)
-  const STEP_FONT_SIZE = '.95rem'; // etwas größer für bessere Lesbarkeit
+  // Layout / Style Konstanten für den Step-Block (responsive)
+  const STEP_FONT_SIZE = isMobile ? '.75rem' : (isTablet ? '.85rem' : '.95rem');
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
   const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
@@ -91,118 +209,40 @@ export default function CustomerPage() {
       });
   }, []);
 
+  // Page Scroll komplett deaktivieren (nur interne Container / iframe dürfen scrollen)
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevHtmlHeight = html.style.height;
+    const prevBodyHeight = body.style.height;
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    html.style.height = '100%';
+    body.style.height = '100%';
+    html.style.overscrollBehavior = 'none';
+    body.style.overscrollBehavior = 'none';
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      html.style.height = prevHtmlHeight;
+      body.style.height = prevBodyHeight;
+      html.style.overscrollBehavior = '';
+      body.style.overscrollBehavior = '';
+    };
+  }, []);
+
   // Lade geparste Tabellen-Zeilen aus Backend und bereite Steps auf
   useEffect(() => {
-    const loadSteps = async () => {
+  const loadSteps = async () => {
       setStepsLoading(true);
       setStepsError(null);
       try {
-  // asHtml true damit wir die originalen <tr class="line"> Zeilen (inkl. Bilder) rendern können
-  // duplicateCaption=false: verhindert doppelte Überschrift/Caption-Ausgabe
-  const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
-  const rowsMeta = data.rowsMeta;
-        if (!rowsMeta) { setSteps([]); return; }
-        const prepared: Step[] = [];
-  let currentSection: string | null = null;             // aus caption_line
-  let currentHeaderCells: string[] | undefined = undefined; // Kopfzeilen aus caption
-  let currentSubSection: string | null = null;           // Text aus caption
-  let currentLineHtml: string | undefined = undefined;   // letzte caption_line HTML (inkl. Bilder)
-
-        // Helper: extrahiere aus einer <tr class=" line"> Zeile nur Pfeil + Text (2. Zelle) und forme sie zu einer flachen flex-Zeile
-        const normalizeImages = (html: string) => html
-          .replace(/<img([^>]*class="[^"]*icon[^"]*"[^>]*)>/gi, (_, attrs) => {
-            const cleaned = attrs.replace(/style="[^"]*"/gi, '');
-            return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
-          })
-          .replace(/<img(?![^>]*icon)([^>]*)>/gi, (_, attrs) => {
-            const cleaned = attrs.replace(/style="[^"]*"/gi, '');
-            return `<img ${cleaned} style="height:18px;display:inline-block;vertical-align:middle;margin:0 4px 0 2px;" />`;
-          });
-
-        const extractCells = (rawTr: string): string[] => {
-          const matches = rawTr.match(/<td[^>]*>[\s\S]*?<\/td>/gi) || [];
-            return matches.map(td => {
-              const m = td.match(/<td[^>]*>([\s\S]*?)<\/td>/i);
-              return m ? m[1].trim() : '';
-            });
-        };
-
-        const buildLineRowHtml = (raw: string | undefined): string | undefined => {
-          if (!raw) return raw;
-          const cells = extractCells(raw);
-          if (cells.length < 2) return raw;
-          const arrow = '→';
-          let body = cells[1]
-            .replace(/<br\s*\/?>(\s)*/gi, ' · ')
-            .replace(/&nbsp;/gi, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          body = normalizeImages(body);
-          return `<div style="display:flex;align-items:center;gap:10px;font-size:${STEP_FONT_SIZE};color:#111;line-height:1.3;font-weight:400;">`
-            + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
-            + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
-            + `</div>`;
-        };
-
-  rowsMeta.forEach((row: RowMeta, idx: number) => {
-          const text = (row?.text || '').trim();
-          if (!text) return;
-          switch (row.row_type) {
-            case 'caption_line':
-              // Sektion (Hauptgruppe) setzen aber Tabellen-Header (currentHeaderCells) NICHT löschen
-              // damit die Kopfzeile "Nr. Umstellpunkt ..." erhalten bleibt
-              currentSection = text;
-              currentSubSection = null;
-              currentLineHtml = row.html || undefined;
-              return;
-            case 'caption':
-              // Unterscheide Spalten-Header (Nr./Umstellpunkt/...) von echten Unter-Abschnittstiteln
-              if (row.cells && row.cells.length > 3) {
-                const first = (row.cells[0] || '').toString().toLowerCase();
-                const second = (row.cells[1] || '').toString().toLowerCase();
-                const looksLikeHeader = (first.startsWith('nr') || first === 'nr.') && second.includes('umstell');
-                if (looksLikeHeader) {
-                  currentHeaderCells = row.cells;
-                  // nicht als subSection anzeigen -> nur Tabellenkopf
-                  return;
-                }
-              }
-              // normale caption (z.B. Untergruppe) -> nicht Header, daher als subSection zeigen, keine headerCells Änderung falls keine Zellen
-              currentHeaderCells = row.cells?.length ? row.cells : currentHeaderCells;
-              currentSubSection = text;
-              return;
-            case 'data':
-              // Zuerst prüfen ob es eine reine line Zeile ist (auch wenn noch keine Sektion existiert)
-        if (Array.isArray(row.classes) && row.classes.includes('line') && !row.classes.includes('caption')) {
-                const sectionName = currentSection || 'Allgemeine Vorbereitung';
-                prepared.push({
-                  index: idx,
-          section: sectionName,
-                  subSection: undefined,
-                  headerCells: undefined,
-                  cells: [],
-                  lineHtml: currentLineHtml,
-                  kind: 'line',
-          lineContentHtml: buildLineRowHtml(row.html || undefined),
-                });
-                return;
-              }
-              if (!currentSection) return; // ohne gesetzte Hauptgruppe (caption_line) keine Datenzeilen erfassen
-              prepared.push({
-                index: idx,
-                section: currentSection,
-                subSection: currentSubSection || undefined,
-                headerCells: currentHeaderCells,
-                cells: row.cells || [],
-                lineHtml: currentLineHtml,
-                kind: 'data'
-              });
-              return;
-            default:
-              return;
-          }
-        });
-        setSteps(prepared);
+    const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
+    const rowsMeta = data.rowsMeta;
+    if (!rowsMeta) { setSteps([]); return; }
+    setSteps(prepareSteps(rowsMeta, STEP_FONT_SIZE));
         setCurrentStep(0);
       } catch (e) {
         setStepsError(e instanceof Error ? e.message : 'Fehler beim Laden der Schritt-Liste');
@@ -211,7 +251,7 @@ export default function CustomerPage() {
       }
     };
     loadSteps();
-  }, []);
+  }, [STEP_FONT_SIZE]);
 
   // Formate laden
   useEffect(() => {
@@ -265,7 +305,7 @@ export default function CustomerPage() {
     const numberToValue: Record<string, string> = {};
     const numberToFTL:   Record<string, string> = {};
     const numberToCart:  Record<string, string> = {};
-    dataItems.forEach((it, idx) => {
+  dataItems.forEach((it, idx) => {
       if (!it || typeof it !== 'object') return;
       // idx entspricht Position im data Array; valueIndexMap keys sind 1-basiert laut Parser
       const dataPos = idx; // 0-basiert
@@ -384,8 +424,11 @@ export default function CustomerPage() {
       const tagId = rawTagId ? rawTagId.toString().trim() : null;
       const normTag = tagId ? tagId.toUpperCase() : null;
       const seen = normTag ? liveEventTagIds.has(normTag) : false;
-      const symbol = tagId ? (seen ? '✔' : '✖') : '–';
-      return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
+  let symbol: string;
+  if (!tagId) symbol = '–';
+  else if (seen) symbol = '✔';
+  else symbol = '✖';
+  return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
     });
   }, [enrichedSteps, assignments, liveEventTagIds]);
 
@@ -395,7 +438,7 @@ export default function CustomerPage() {
   // Statistiken zu Assignments & Erkennung
   const rfidStats = React.useMemo(() => {
     // Alle data-rows mit zugewiesenem Tag
-  const rowsWithTag = stepsWithStatus.filter(r => r._rfidStatus && r._rfidStatus.tagId);
+  const rowsWithTag = stepsWithStatus.filter(r => r._rfidStatus?.tagId);
     const assignedTotal = rowsWithTag.length;
   const recognizedAssigned = rowsWithTag.filter(r => r._rfidStatus?.seen).length;
     // Menge aller zugewiesenen normierten Tags
@@ -417,29 +460,28 @@ export default function CustomerPage() {
     });
   }, [steps.length]);
   return (
-    <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: '100vh' }}>
+    <div className="flex flex-col bg-white dark:bg-black" style={{ height: '100dvh', overflow:'hidden' }}>
       <Header profile="Customer" />
-      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%', display:'flex', flexDirection:'column' }}>
-        <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa' }}>
+      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        {/* Steuerleiste */}
+        <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
             <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
             <button onClick={()=>setShowSteps(s=>!s)} style={{ fontSize:'.65rem', padding:'4px 8px', border:'1px solid #bbb', background:'#fff', borderRadius:4, cursor:'pointer' }}>
-              {showSteps ? 'Ausblenden' : 'Anzeigen'}
+              {showSteps ? 'Anleitung verbergen' : 'Anleitung anzeigen'}
             </button>
-            {showSteps && (
-              <span style={{ marginLeft:'auto', fontSize:'.6rem', color:'#555' }}>
-                {rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} erkannt · {rfidStats.foreignCount} fremd
-              </span>
-            )}
           </div>
           {showSteps && stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Lade Schritte…</div>}
           {showSteps && stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
           {showSteps && !stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
+        </div>
+        {/* Content Bereich der restliche Höhe füllt */}
+  <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', padding: showSteps ? '8px 10px' : 0, gap: showSteps ? 8 : 0, overflow:'hidden' }}>
           {showSteps && current && (
-            <div style={{ marginTop: 8, height: STEP_PANEL_HEIGHT, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative' }}>
-                <label style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
-                <select
+            <div style={{ flex:1, minHeight:0, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: isMobile ? '6px 8px' : '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative', flexShrink:0, flexWrap:isMobile ? 'wrap' : 'nowrap' }}>
+                <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
+                <select id="formatSelect"
                   value={selectedFormat || ''}
                   onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
                   style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}
@@ -455,7 +497,7 @@ export default function CustomerPage() {
                   <span title="Erkannte Tags ohne Zuweisung" style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} falsche Formatteile erkannt</span>
                 </div>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ flex:1, minHeight:0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {current.kind === 'data' && (
                     <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 700, color: '#111', letterSpacing: '.06em', textTransform: 'uppercase' }}>{current.section}</div>
@@ -468,13 +510,14 @@ export default function CustomerPage() {
                   )}
                 </div>
                 {current.kind === 'data' && current.headerCells && (
-                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: 'fixed' }}>
+                  <div style={{ width:'100%', overflowX: 'auto' }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: 'fixed', minWidth: isMobile ? 700 : 'auto' }}>
                     {COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
                       <colgroup>
-                        {COLUMN_WIDTHS.map((w, i) => (
-                          <col key={i} style={{ width: typeof w === 'number' ? `${w}px` : w }} />
-                        ))}
-                        {/* zusätzliche dynamische Status-Spalte falls nötig */}
+                        {COLUMN_WIDTHS.map((w, i) => {
+                          const colKey = `col_${current.headerCells?.[i] || i}`;
+                          return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
+                        })}
                         {current._rfidStatus && <col style={{ width: '6%' }} />}
                       </colgroup>
                     )}
@@ -492,26 +535,30 @@ export default function CustomerPage() {
                       <tr>
                         {current.cells.map((c: string, i: number) => {
                           const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                          const injected = current._injectedValue && i === 2; // Wert-Spalte
+                          const injected = current._injectedValue && i === 2;
                           return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: injected ? '#fff9e6' : '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: injected ? 600 : 400, color: '#111' }}>{c}</td>;
                         })}
-                        {current._rfidStatus && (
-                          <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize: STEP_FONT_SIZE, fontWeight:700,
-                                       color: current._rfidStatus.tagId ? (current._rfidStatus.seen ? '#0a7a15' : '#b30000') : '#666' }}
-                              title={!current._rfidStatus.tagId
-                                ? `Kein RFID zugeordnet | Key=${current._rfidStatus.keyTried}`
-                                : (current._rfidStatus.seen
-                                  ? `Tag ${current._rfidStatus.tagId} erkannt | Key=${current._rfidStatus.keyTried} | Norm=${current._rfidStatus.tagIdNorm}`
-                                  : `Tag ${current._rfidStatus.tagId} nicht erkannt | Key=${current._rfidStatus.keyTried} | Norm=${current._rfidStatus.tagIdNorm}`)}>
-                            {current._rfidStatus.symbol}
-                          </td>
-                        )}
+                        {current._rfidStatus && (() => {
+                          const rs = current._rfidStatus;
+                          let rfidColor = '#666';
+                          if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
+                          let titleText: string;
+                          if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`;
+                          else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                          else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                          return (
+                            <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize: STEP_FONT_SIZE, fontWeight:700, color: rfidColor }} title={titleText}>
+                              {rs.symbol}
+                            </td>
+                          );
+                        })()}
                       </tr>
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink:0 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
                 <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
                 <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {totalSteps}</div>
@@ -519,8 +566,16 @@ export default function CustomerPage() {
               <input type="range" min={0} max={Math.max(totalSteps - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%', marginTop: 6 }} />
             </div>
           )}
+          {!showSteps && fileUrl && (
+            <div style={{ flex:1, minHeight:0, display:'flex' }}>
+              <iframe
+                src={fileUrl}
+                title="Externe HTML"
+                style={{ width: '100%', flex:1, border: 'none', background: '#fff', display: 'block', overflow:'auto' }}
+              />
+            </div>
+          )}
         </div>
-  {fileUrl && <iframe src={fileUrl} title="Externe HTML" style={{ width: '100%', flex:1, border: 'none', background: '#fff', display: 'block', marginTop: showSteps ? 0 : 8 }} />}
       </main>
     </div>
   );

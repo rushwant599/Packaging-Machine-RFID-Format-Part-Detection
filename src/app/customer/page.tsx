@@ -54,6 +54,8 @@ interface Step extends StepBase {
   _injectedValue?: boolean;
   _prevValue?: string;
   _rfidStatus?: RFIDStatus;
+  // Optional: bei Wechsel-Modus Quelle-Zellen behalten (vorherige Formatwerte)
+  _fromCells?: string[];
 }
 
 // ---------- Responsive Utilities ----------
@@ -106,7 +108,7 @@ function buildLineRowHtml(raw: string | undefined, fontSize: string): string | u
   body = normalizeImagesBlock(body, fontSize);
   return `<div style="display:flex;align-items:center;gap:10px;font-size:${fontSize};color:#111;line-height:1.3;font-weight:400;">`
     + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
-    + `<span style=\"display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;\">${body}</span>`
+  + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
     + `</div>`;
 }
 
@@ -186,6 +188,10 @@ export default function CustomerPage() {
   const [formats, setFormats] = useState<Record<string, unknown>>({});
   const [formatNames, setFormatNames] = useState<string[]>([]);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
+  // Neuer Wechsel / Diff Modus
+  const [fromFormat, setFromFormat] = useState<string | null>(null);
+  const [toFormat, setToFormat] = useState<string | null>(null);
+  const [diffMode, setDiffMode] = useState<boolean>(false); // Wenn aktiv: zeige nur Schritte mit Unterschieden zwischen zwei Formaten
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
   // Layout / Style Konstanten für den Step-Block (responsive)
@@ -291,56 +297,94 @@ export default function CustomerPage() {
   }, [selectedFormat]);
 
   // Werte aus gewähltem Format in Steps projizieren (nutzt valueIndexMap + items)
-  const enrichedSteps = React.useMemo(() => {
-  if (!selectedFormat || !formats[selectedFormat]) return steps;
-  const fmt = formats[selectedFormat];
+  // Hilfsfunktion: injiziert Werte eines bestimmten Formats in eine Kopie der Steps und liefert Map index->cells
+  const injectFormat = useCallback((formatName: string | null) => {
+    if (!formatName || !formats[formatName]) return new Map<number, { cells: string[]; injected?: boolean }>();
+    const fmt = formats[formatName];
     const allFormatsFromDetail = formatDetail?.formats || {};
-    const detailFmt = allFormatsFromDetail[selectedFormat] || fmt; // Fallback auf einfache Formats-Struktur
-  const dataItems: FormatItem[] = Array.isArray((detailFmt as { data?: unknown })?.data)
-    ? (detailFmt as { data?: FormatItem[] }).data || []
-    : [];
+    const detailFmt = allFormatsFromDetail[formatName] || fmt;
+    const dataItems: FormatItem[] = Array.isArray((detailFmt as { data?: unknown })?.data)
+      ? (detailFmt as { data?: FormatItem[] }).data || []
+      : [];
     const valueIndexMap: Record<number, string> = (formatDetail?.valueIndexMap) || {};
-
-    // Map sichtbare Nummer -> Wert (value), FTL. (formatPart) und Wagen (cart)
     const numberToValue: Record<string, string> = {};
-    const numberToFTL:   Record<string, string> = {};
-    const numberToCart:  Record<string, string> = {};
-  dataItems.forEach((it, idx) => {
+    const numberToFTL: Record<string, string> = {};
+    const numberToCart: Record<string, string> = {};
+    dataItems.forEach((it, idx) => {
       if (!it || typeof it !== 'object') return;
-      // idx entspricht Position im data Array; valueIndexMap keys sind 1-basiert laut Parser
-      const dataPos = idx; // 0-basiert
-      const visible = (it.valueIndex) || valueIndexMap[dataPos] || valueIndexMap[dataPos + 1] || ''; // Versuch verschiedene Offsets
+      const dataPos = idx;
+      const visible = (it.valueIndex) || valueIndexMap[dataPos] || valueIndexMap[dataPos + 1] || '';
       const rawVal = it.value ?? it.formatValue ?? '';
       const val = (rawVal || '').toString().trim();
       const ftl = (it.formatPart || '').toString().trim();
       const cart = (it.cart || '').toString().trim();
-  // Ersten Dummy/Platzhalter-Datensatz (Header repliziert im Daten-Array) ignorieren:
-  const isPlaceholder = val.toLowerCase() === 'wert' && (ftl.toLowerCase() === 'ftl.' || ftl.toLowerCase() === 'ftl') && cart.toLowerCase() === 'wagen';
-  if (isPlaceholder) return;
+      const isPlaceholder = val.toLowerCase() === 'wert' && (ftl.toLowerCase() === 'ftl.' || ftl.toLowerCase() === 'ftl') && cart.toLowerCase() === 'wagen';
+      if (isPlaceholder) return;
       if (visible) {
         if (val && !numberToValue[visible]) numberToValue[visible] = val;
         if (ftl && !numberToFTL[visible]) numberToFTL[visible] = ftl;
         if (cart && !numberToCart[visible]) numberToCart[visible] = cart;
       }
     });
-
-    const base = steps.map<Step>(s => {
-      if (s.kind !== 'data' || !s.cells.length) return s;
+    const map = new Map<number, { cells: string[]; injected?: boolean }>();
+    steps.forEach(s => {
+      if (s.kind !== 'data' || !s.cells.length) return;
       const nr = (s.cells[0] || '').toString().trim();
-      if (!nr) return s;
+      if (!nr) return;
       const val = numberToValue[nr];
       const ftl = numberToFTL[nr];
       const cart = numberToCart[nr];
-      if (!val && !ftl && !cart) return s; // nichts zu tun
-      const cellsCopy = [...s.cells];
-      const prevVal = cellsCopy[2];
-      if (val) cellsCopy[2] = val; // Wert
-      if (ftl) cellsCopy[3] = ftl; // FTL.
-      if (cart) cellsCopy[4] = cart; // Wagen
-      return { ...s, cells: cellsCopy, _injectedValue: !!val, _prevValue: prevVal };
+      if (!val && !ftl && !cart) return; // Keine Änderungen
+      const copy = [...s.cells];
+      if (val) copy[2] = val;
+      if (ftl) copy[3] = ftl;
+      if (cart) copy[4] = cart;
+      map.set(s.index, { cells: copy, injected: !!val });
     });
-    return base;
-  }, [steps, selectedFormat, formats, formatDetail]);
+    return map;
+  }, [steps, formats, formatDetail]);
+
+  // Enriched Steps (Single Format) oder Unterschieds-Liste bei diffMode
+  const enrichedSteps = React.useMemo(() => {
+    // Wechselmodus aktiv? -> Filter nur veränderte data Steps behalten (plus alle line Steps)
+    if (diffMode && fromFormat && toFormat && fromFormat !== toFormat) {
+      const fromMap = injectFormat(fromFormat);
+      const toMap = injectFormat(toFormat);
+      const filtered: Step[] = [];
+      steps.forEach(s => {
+        if (s.kind === 'line') { // Linien immer behalten
+          filtered.push(s);
+          return;
+        }
+        if (s.kind === 'data') {
+          const fromEntry = fromMap.get(s.index);
+          const toEntry = toMap.get(s.index);
+            // Falls Ziel ohne Änderung -> Schritt überspringen
+          if (!toEntry && !fromEntry) return; // Keine Änderung in beiden
+          // Entscheide ob relevante Spalten geändert wurden (2=Wert,3=FTL.,4=Wagen)
+          const baseCells = [...s.cells];
+          const fromCells = fromEntry ? fromEntry.cells : baseCells;
+          const toCells = toEntry ? toEntry.cells : baseCells;
+          const changed = [2,3,4].some(i => (fromCells[i]||'').toString().trim() !== (toCells[i]||'').toString().trim());
+          if (!changed) return;
+          const stepCells = [...toCells];
+          const prevVal = s.cells[2];
+          filtered.push({ ...s, cells: stepCells, _injectedValue: changed, _prevValue: prevVal, _fromCells: fromCells });
+        }
+      });
+      return filtered;
+    }
+    // Normaler Einzel-Format Modus
+    if (!selectedFormat || !formats[selectedFormat]) return steps;
+    const singleMap = injectFormat(selectedFormat);
+    return steps.map(s => {
+      if (s.kind !== 'data') return s;
+      const m = singleMap.get(s.index);
+      if (!m) return s;
+      const prevVal = s.cells[2];
+      return { ...s, cells: m.cells, _injectedValue: m.injected, _prevValue: prevVal };
+    });
+  }, [steps, selectedFormat, formats, formatDetail, diffMode, fromFormat, toFormat, injectFormat]);
 
   // --- RFID Assignments + Live Sichtbarkeit ---
   const [assignments, setAssignments] = React.useState<AssignmentsMap>({}); // format_part -> { rfid_tag_id }
@@ -432,22 +476,59 @@ export default function CustomerPage() {
     });
   }, [enrichedSteps, assignments, liveEventTagIds]);
 
+  // Separater Satz für Statistik: im diffMode immer komplette Ziel-Format-Injektion statt gefilterter Unterschiede
+  const statsStepsWithStatus: Step[] = React.useMemo(() => {
+    if (!(diffMode && toFormat && toFormat !== fromFormat)) {
+      return stepsWithStatus; // normaler Modus nutzt sichtbare Steps
+    }
+    // Volle Kopie aller Steps mit Ziel-Format-Injektion
+    const targetMap = injectFormat(toFormat);
+    const fullInjected = steps.map<Step>(s => {
+      if (s.kind !== 'data') return s;
+      const m = targetMap.get(s.index);
+      if (!m) return s;
+      return { ...s, cells: m.cells };
+    });
+    // Status darauf berechnen (gleiche Logik wie oben, dupliziert für Klarheit)
+    return fullInjected.map<Step>(s => {
+      if (s.kind !== 'data' || !s.cells.length) return s;
+      const key = deriveFormatPartKey(s);
+      if (!key) return s;
+      let assignment = assignments[key];
+      if (!assignment) {
+        const alt1 = key.replace(/\s+/g,' ').trim();
+        assignment = assignments[alt1];
+      }
+      if (!assignment) {
+        const alt2 = key.replace(/\./g,'').replace(/\s+/g,' ').trim();
+        assignment = assignments[alt2];
+      }
+      const rawTagId = typeof assignment === 'string'
+        ? assignment
+        : (assignment?.rfid_tag_id ?? (assignment as AssignmentsMapEntry | undefined)?.rfidTagId);
+      const tagId = rawTagId ? rawTagId.toString().trim() : null;
+      const normTag = tagId ? tagId.toUpperCase() : null;
+      const seen = normTag ? liveEventTagIds.has(normTag) : false;
+      let symbol: string;
+      if (!tagId) symbol = '–'; else if (seen) symbol = '✔'; else symbol = '✖';
+      return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
+    });
+  }, [diffMode, toFormat, fromFormat, stepsWithStatus, injectFormat, steps, assignments, liveEventTagIds]);
+
   const current = stepsWithStatus[currentStep];
   const totalSteps = stepsWithStatus.length;
 
   // Statistiken zu Assignments & Erkennung
   const rfidStats = React.useMemo(() => {
-    // Alle data-rows mit zugewiesenem Tag
-  const rowsWithTag = stepsWithStatus.filter(r => r._rfidStatus?.tagId);
+    const basis = statsStepsWithStatus;
+    const rowsWithTag = basis.filter(r => r._rfidStatus?.tagId);
     const assignedTotal = rowsWithTag.length;
-  const recognizedAssigned = rowsWithTag.filter(r => r._rfidStatus?.seen).length;
-    // Menge aller zugewiesenen normierten Tags
-  const assignedNormSet = new Set(rowsWithTag.map(r => r._rfidStatus?.tagIdNorm).filter(Boolean));
-    // Fremde erkannte Tags = liveEventTagIds ohne zugewiesene
+    const recognizedAssigned = rowsWithTag.filter(r => r._rfidStatus?.seen).length;
+    const assignedNormSet = new Set(rowsWithTag.map(r => r._rfidStatus?.tagIdNorm).filter(Boolean));
     let foreignCount = 0;
     liveEventTagIds.forEach(t => { if (!assignedNormSet.has(t)) foreignCount++; });
     return { assignedTotal, recognizedAssigned, foreignCount };
-  }, [stepsWithStatus, liveEventTagIds]);
+  }, [statsStepsWithStatus, liveEventTagIds]);
 
   const hasPrev = currentStep > 0;
   const hasNext = currentStep < totalSteps - 1;
@@ -480,18 +561,45 @@ export default function CustomerPage() {
           {showSteps && current && (
             <div style={{ flex:1, minHeight:0, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: isMobile ? '6px 8px' : '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
               <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative', flexShrink:0, flexWrap:isMobile ? 'wrap' : 'nowrap' }}>
-                <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
-                <select id="formatSelect"
-                  value={selectedFormat || ''}
-                  onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
-                  style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}
-                >
-                  <option value=''>-- wählen --</option>
-                  {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+                {!diffMode && (
+                  <>
+                    <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
+                    <select id="formatSelect"
+                      value={selectedFormat || ''}
+                      onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
+                      style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}
+                    >
+                      <option value=''>-- wählen --</option>
+                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    {selectedFormat && <button title="Format zurücksetzen" onClick={()=>{ setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding:'4px 6px', background:'#f4f4f4', color:'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>Reset</button>}
+                  </>
+                )}
+                {diffMode && (
+                  <>
+                    <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Von:</label>
+                    <select id="fromFormat" value={fromFormat || ''} onChange={e=>{ setFromFormat(e.target.value||null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}>
+                      <option value=''>-- Quelle --</option>
+                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Nach:</label>
+                    <select id="toFormat" value={toFormat || ''} onChange={e=>{ setToFormat(e.target.value||null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}>
+                      <option value=''>-- Ziel --</option>
+                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </>
+                )}
+                <button
+                  title="Wechsel-Modus: Zeigt nur Unterschiede von Quelle zu Ziel (alle Linien bleiben)"
+                  onClick={() => { setDiffMode(m=>!m); setCurrentStep(0); }}
+                  style={{ fontSize: '.65rem', padding:'4px 6px', background: diffMode ? '#222' : '#f4f4f4', color: diffMode ? '#fff':'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>
+                  {diffMode ? 'Wechsel-Modus an' : 'Wechsel-Modus aus'}
+                </button>
+                {diffMode && fromFormat && toFormat && fromFormat === toFormat && (
+                  <span style={{ fontSize:'.6rem', color:'#b00' }}>Bitte unterschiedliche Formate wählen</span>
+                )}
                 {formatLoading && <span style={{ fontSize: '.65rem', color:'#444' }}>lädt…</span>}
                 {formatError && <span style={{ fontSize: '.65rem', color:'#b00' }}>{formatError}</span>}
-                {selectedFormat && <button title="Format zurücksetzen" onClick={()=>setSelectedFormat(null)} style={{ fontSize: '.65rem', padding:'4px 6px', background:'#f4f4f4', color:'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>Reset</button>}
                 <div style={{ marginLeft:'auto', display:'flex', gap:14, alignItems:'center', fontSize:'.65rem', fontWeight:600, color:'#222', flexWrap:'wrap' }}>
                   <span title="Erkannte vs. zugeordnete Formatteile">{rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} Formatteile erkannt</span>
                   <span title="Erkannte Tags ohne Zuweisung" style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} falsche Formatteile erkannt</span>
@@ -535,8 +643,13 @@ export default function CustomerPage() {
                       <tr>
                         {current.cells.map((c: string, i: number) => {
                           const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                          const injected = current._injectedValue && i === 2;
-                          return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: injected ? '#fff9e6' : '#fff', fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: injected ? 600 : 400, color: '#111' }}>{c}</td>;
+                          const injected = current._injectedValue && [2,3,4].includes(i);
+                          const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
+                          const changed = diffMode && fromVal !== undefined && fromVal !== c && [2,3,4].includes(i);
+                          return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: changed ? '#ffe8e6' : (injected ? '#fff9e6' : '#fff'), fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: changed ? 700 : (injected ? 600 : 400), color: '#111', position:'relative' }}>
+                            {c}
+                            {changed && fromVal && <span style={{ position:'absolute', left:4, bottom:2, fontSize:'0.55rem', color:'#b00', fontWeight:500 }}>alt: {fromVal}</span>}
+                          </td>;
                         })}
                         {current._rfidStatus && (() => {
                           const rs = current._rfidStatus;

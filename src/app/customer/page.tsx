@@ -75,7 +75,7 @@ const GENERIC_IMG_REGEX = /<img(?![^>]*icon)([^>]*)>/gi;
 const TD_CELL_REGEX_GLOBAL = /<td[^>]*>[\s\S]*?<\/td>/gi;
 const TD_CELL_REGEX_SINGLE = /<td[^>]*>([\s\S]*?)<\/td>/i;
 
-function normalizeImagesBlock(html: string, fontSize: string) {
+function normalizeImagesBlock(html: string) {
   return html
     .replace(ICON_IMG_REGEX, (_, attrs) => {
       const cleaned = attrs.replace(/style="[^"]*"/gi, '');
@@ -105,7 +105,7 @@ function buildLineRowHtml(raw: string | undefined, fontSize: string): string | u
     .replace(/&nbsp;/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  body = normalizeImagesBlock(body, fontSize);
+  body = normalizeImagesBlock(body);
   return `<div style="display:flex;align-items:center;gap:10px;font-size:${fontSize};color:#111;line-height:1.3;font-weight:400;">`
     + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
   + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
@@ -410,7 +410,7 @@ export default function CustomerPage() {
       const prevVal = s.cells[2];
       return { ...s, cells: m.cells, _injectedValue: m.injected, _prevValue: prevVal };
     });
-  }, [steps, selectedFormat, formats, formatDetail, diffMode, fromFormat, toFormat, injectFormat]);
+  }, [steps, selectedFormat, formats, diffMode, fromFormat, toFormat, injectFormat]);
 
   // --- RFID Assignments + Live Sichtbarkeit ---
   const [assignments, setAssignments] = React.useState<AssignmentsMap>({}); // format_part -> { rfid_tag_id }

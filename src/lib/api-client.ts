@@ -11,8 +11,12 @@ if (!resolvedBase && typeof window !== 'undefined') {
 // Fallback (Dev Einzelstart): localhost
 const BACKEND_URL = resolvedBase || 'http://localhost:8001';
 // Optional: kurze Debug-Ausgabe einmalig
-if (typeof window !== 'undefined' && !(window as any).__BACKEND_URL_LOGGED__) {
-  (window as any).__BACKEND_URL_LOGGED__ = true;
+declare global {
+  interface Window { __BACKEND_URL_LOGGED__?: boolean }
+}
+if (typeof window !== 'undefined' && !window.__BACKEND_URL_LOGGED__) {
+  window.__BACKEND_URL_LOGGED__ = true;
+  // bewusstes Logging für einmalige Debug-Info
   // eslint-disable-next-line no-console
   console.log('[api-client] BACKEND_URL =', BACKEND_URL);
 }
@@ -90,7 +94,7 @@ class APIClient {
       throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+  return response.json() as Promise<T>;
   }
 
   // Health check

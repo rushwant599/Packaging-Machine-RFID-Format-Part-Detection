@@ -9,7 +9,7 @@ if (!resolvedBase && typeof window !== 'undefined') {
   resolvedBase = `${protocol}//${hostname}:${backendPort}`;
 }
 // Fallback (Dev Einzelstart): localhost
-const BACKEND_URL = resolvedBase || 'http://localhost:8001';
+export const BACKEND_URL = resolvedBase || 'http://localhost:8001';
 // Optional: kurze Debug-Ausgabe einmalig
 declare global {
   interface Window { __BACKEND_URL_LOGGED__?: boolean }
@@ -68,6 +68,8 @@ export interface OPCUAValueResponse {
   };
   last_updated: string;
 }
+
+interface PicturesByPartResponse { success: boolean; files: string[]; count: number }
 
 class APIClient {
   private readonly baseURL: string;
@@ -214,6 +216,12 @@ class APIClient {
     return this.request('/api/opc-ua/reconnect', {
       method: 'POST',
     });
+  }
+
+  // Pictures
+  async getPicturesByPart(formatPart: string): Promise<PicturesByPartResponse> {
+    const endpoint = `/api/pictures/by-part/${encodeURIComponent(formatPart)}`;
+    return this.request<PicturesByPartResponse>(endpoint);
   }
 }
 

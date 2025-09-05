@@ -1,7 +1,7 @@
 "use client";
 import Header from "@/components/Header";
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, BACKEND_URL } from "@/lib/api-client";
 
 // -------------------- Typdefinitionen --------------------
 interface RowMeta {
@@ -543,6 +543,66 @@ export default function CustomerPage() {
 
   const current = stepsWithStatus[currentStep];
   const totalSteps = stepsWithStatus.length;
+  // Bild-Preview Overlay
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  // Dynamische Max-Höhe für Inline-Bild (kein Scroll nötig)
+  const inlineImageMaxHeight = React.useMemo(() => {
+    if (width < 480) return '26vh';
+    if (width < 680) return '30vh';
+    if (width < 900) return '34vh';
+    if (width < 1200) return '38vh';
+    return '42vh';
+  }, [width]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // --- Bilder für aktuellen Schritt ---
+  const [currentPictures, setCurrentPictures] = useState<string[]>([]);
+  const [pictureLoading, setPictureLoading] = useState(false);
+  const picturesCacheRef = useRef<Map<string, string[]>>(new Map());
+
+  // Hilfsfunktion: Ableitung des Picture-Part Keys (Anlehnung an vorhandene Dateien z.B. 1_01-01_...)
+  const derivePicturePartKey = useCallback((row: Step | undefined): string | null => {
+    if (!row || row.kind !== 'data') return null;
+    // Erwartete Struktur: cells[0] = Nr., cells[3] = FTL. (Formatteil). Nur laden wenn beides sinnvoll befüllt ist.
+    const nr = (row.cells?.[0] || '').toString().trim();
+    const ftl = (row.cells?.[3] || '').toString().trim();
+    if (!nr || !ftl) return null;
+    // Ignore offensichtliche Platzhalter wie 'FTL.' oder 'FTL'
+    const ftlLower = ftl.toLowerCase();
+    if (ftlLower === 'ftl.' || ftlLower === 'ftl') return null;
+    // Schlüssel-Konvention: <Nr>_<FTL>
+    const raw = `${nr}_${ftl}`;
+    const cleaned = raw.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100);
+    return cleaned || null;
+  }, []);
+
+  // Bilder laden wenn Schritt wechselt
+  useEffect(() => {
+    if (!showSteps) { setCurrentPictures([]); return; }
+    const step = stepsWithStatus[currentStep];
+    const key = derivePicturePartKey(step);
+    if (!key) { setCurrentPictures([]); return; }
+    if (picturesCacheRef.current.has(key)) {
+      setCurrentPictures(picturesCacheRef.current.get(key)!);
+      return;
+    }
+    setPictureLoading(true);
+    apiClient.getPicturesByPart(key)
+      .then(resp => {
+        const list = Array.isArray(resp?.files) ? resp.files : [];
+        // Backend liefert sortiert (lexikographisch). Neueste = letzte (Timestamp im Namen).
+        const newest = list.length ? list[list.length - 1] : undefined;
+        const single = newest ? [newest] : [];
+        picturesCacheRef.current.set(key, single);
+        setCurrentPictures(single);
+      })
+      .catch(() => { setCurrentPictures([]); })
+      .finally(() => setPictureLoading(false));
+  }, [currentStep, showSteps, stepsWithStatus, derivePicturePartKey]);
 
   // Statistiken zu Assignments & Erkennung
   const rfidStats = React.useMemo(() => {
@@ -711,6 +771,48 @@ export default function CustomerPage() {
                     )}
                   </div>
                 )}
+                {/* Bilder Bereich */}
+                {/* Bilder nur anzeigen, wenn es sich um einen echten Formatteil handelt UND mindestens 1 Bild vorhanden oder gerade lädt */}
+                {current.kind === 'data' && (() => {
+                  const key = derivePicturePartKey(current);
+                  if (!key) return null; // kein echtes Formatteil
+                  return (
+                    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color:'#555' }}>Lade Bild…</div>}
+                      {!pictureLoading && currentPictures.length > 0 && (
+                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                          <div style={{ fontSize: STEP_FONT_SIZE, fontWeight:600, color:'#222' }}>Bild</div>
+                          <div style={{ width:'100%', display:'flex', justifyContent:'flex-start' }}>
+                            {currentPictures.map(fn => {
+                              const src = `${BACKEND_URL}/pictures/${encodeURIComponent(fn)}`;
+                              return (
+                                <div key={fn} style={{ position:'relative', maxWidth:'100%', flex:'0 1 auto', border:'1px solid #ddd', borderRadius:6, padding:4, background:'#fafafa' }}>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setPreviewImage(src)}
+                                    onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') { e.preventDefault(); setPreviewImage(src);} }}
+                                    style={{ outline:'none', cursor:'pointer', maxWidth:'100%' }}
+                                  >
+                                    <img
+                                      src={src}
+                                      alt={fn}
+                                      style={{ display:'block', width:'auto', height:'auto', maxWidth:'100%', maxHeight: inlineImageMaxHeight, objectFit:'contain', borderRadius:4 }}
+                                      loading="lazy"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {!pictureLoading && currentPictures.length === 0 && (
+                        <div style={{ fontSize: '.55rem', color:'#777' }}>Kein Bild vorhanden</div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink:0 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
@@ -731,6 +833,30 @@ export default function CustomerPage() {
           )}
         </div>
       </main>
+      {previewImage && (
+        <div
+          onClick={()=>setPreviewImage(null)}
+          role="dialog"
+          aria-modal="true"
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:'4vw' }}
+        >
+          <div
+            onClick={e=>e.stopPropagation()}
+            style={{ position:'relative', maxWidth:'94vw', maxHeight:'90vh', display:'flex', flexDirection:'column', gap:8 }}
+          >
+            <button
+              type="button"
+              onClick={()=>setPreviewImage(null)}
+              style={{ position:'absolute', top:4, right:4, background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:4, fontSize:'.7rem', cursor:'pointer' }}
+            >Schließen ✕</button>
+            <img
+              src={previewImage}
+              alt="Vorschau"
+              style={{ maxWidth:'100%', maxHeight:'90vh', objectFit:'contain', borderRadius:6, boxShadow:'0 4px 18px rgba(0,0,0,0.4)' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

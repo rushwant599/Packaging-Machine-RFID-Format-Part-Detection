@@ -157,6 +157,7 @@ function updatePartsDisplay() {
       <label>${p.id}</label>
       <input type="checkbox" id="check-${p.id}" class="assign-check" disabled>
       <button onClick="showPicture('${p.id}')">Show picture</button>
+  <button onClick="openUpload('${p.id}')">Upload</button>
     `;
     assignedList.appendChild(assigned);
   });
@@ -306,6 +307,146 @@ function showNext() {
   currentIndex = (currentIndex + 1) % matchedPictures.length;
   showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
 }
+
+// Picture Upload (File or Camera)
+let uploadPartId = null;
+let mediaStream = null;
+
+function openUpload(partId) {
+  uploadPartId = partId;
+  const modal = ensureUploadModal();
+  modal.style.display = 'flex';
+  modal.querySelector('#upload-title').textContent = `Upload Bild für ${partId}`;
+}
+
+function closeUpload() {
+  const modal = document.getElementById('upload-modal');
+  if (!modal) return;
+  stopCamera();
+  modal.style.display = 'none';
+  uploadPartId = null;
+}
+
+function ensureUploadModal() {
+  let modal = document.getElementById('upload-modal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'upload-modal';
+  modal.innerHTML = `
+  <div class="upload-backdrop" onclick="closeUpload()"></div>
+  <div class="upload-content" onclick="event.stopPropagation()">
+    <h3 id="upload-title">Upload Bild</h3>
+    <div class="upload-actions">
+      <input id="file-input" type="file" accept="image/*" style="display:none" />
+      <button onclick="triggerFile()">Datei wählen</button>
+      <button id="camera-btn" onclick="toggleCamera()">Kamera</button>
+      <button onclick="closeUpload()">Schließen</button>
+    </div>
+    <div class="camera-area">
+      <video id="camera" autoplay playsinline style="display:none"></video>
+      <canvas id="snapshot" style="display:none"></canvas>
+      <div class="camera-controls" id="camera-controls" style="display:none">
+        <button onclick="takeSnapshot()">Foto aufnehmen</button>
+        <button onclick="stopCamera()">Kamera stoppen</button>
+      </div>
+    </div>
+    <div id="upload-status" class="upload-status"></div>
+  </div>`;
+  document.body.appendChild(modal);
+  // File change handler
+  modal.querySelector('#file-input').addEventListener('change', handleFileSelected);
+  return modal;
+}
+
+function triggerFile() {
+  const input = document.getElementById('file-input');
+  if (input) input.click();
+}
+
+async function handleFileSelected(ev) {
+  const file = ev.target.files[0];
+  if (!file || !uploadPartId) return;
+  const status = document.getElementById('upload-status');
+  status.textContent = 'Lade hoch...';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      status.textContent = 'Upload erfolgreich';
+    } else {
+      status.textContent = 'Fehler beim Upload';
+    }
+  } catch (e) {
+    status.textContent = 'Fehler: ' + e;
+  }
+  ev.target.value = '';
+}
+
+async function toggleCamera() {
+  const video = document.getElementById('camera');
+  if (!video) return;
+  if (mediaStream) {
+    stopCamera();
+    return;
+  }
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    video.srcObject = mediaStream;
+    video.style.display = 'block';
+    document.getElementById('camera-controls').style.display = 'flex';
+    document.getElementById('camera-btn').textContent = 'Kamera läuft';
+  } catch (e) {
+    document.getElementById('upload-status').textContent = 'Kamera Fehler: ' + e;
+  }
+}
+
+function stopCamera() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  const video = document.getElementById('camera');
+  if (video) video.style.display = 'none';
+  const controls = document.getElementById('camera-controls');
+  if (controls) controls.style.display = 'none';
+  const btn = document.getElementById('camera-btn');
+  if (btn) btn.textContent = 'Kamera';
+}
+
+async function takeSnapshot() {
+  if (!mediaStream || !uploadPartId) return;
+  const video = document.getElementById('camera');
+  const canvas = document.getElementById('snapshot');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  const status = document.getElementById('upload-status');
+  status.textContent = 'Sende Foto...';
+  try {
+    const form = new FormData();
+    form.append('image_base64', dataUrl);
+    const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      status.textContent = 'Foto gespeichert';
+    } else {
+      status.textContent = 'Fehler beim Speichern';
+    }
+  } catch (e) {
+    status.textContent = 'Fehler: ' + e;
+  }
+}
+
+// Close modal with ESC
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeUpload();
+  }
+});
 
 // Initialize the application
 window.onload = async () => {

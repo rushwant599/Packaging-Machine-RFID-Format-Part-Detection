@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -1176,7 +1176,7 @@ def _mount_pictures_static() -> None:
 _mount_pictures_static()
 
 @app.get("/api/pictures")
-def list_pictures(include_meta: bool = False):
+def list_pictures(include_meta: bool = False, part: str | None = None):
     """List files in the persistent pictures directory.
 
     Query Params:
@@ -1195,6 +1195,9 @@ def list_pictures(include_meta: bool = False):
                 continue
             full = PICTURES_DIR / name
             if not full.is_file():
+                continue
+            if part and not name.startswith(part + "_") and not name.startswith(part + "."):
+                # Convention: either exact part as prefix with underscore timestamp or direct filename starting with part.
                 continue
             if include_meta:
                 stat = full.stat()
@@ -1215,6 +1218,122 @@ def list_pictures(include_meta: bool = False):
     except Exception as e:  # noqa: BLE001
         logger.error("Error retrieving pictures list (%s): %s", PICTURES_DIR, e)
         raise HTTPException(status_code=500, detail="Error retrieving pictures list")
+
+
+@app.get("/api/pictures/by-part/{format_part}")
+def list_pictures_for_part(format_part: str):
+    """Return only pictures that belong to a given format part.
+
+    A picture is considered belonging to a part if the filename starts with
+    "{format_part}_" or "{format_part}." (for legacy direct naming)
+    """
+    try:
+        if not PICTURES_DIR.exists():
+            if not _ensure_pictures_dir():
+                return {"success": False, "files": [], "count": 0}
+        files = [f for f in os.listdir(PICTURES_DIR) if os.path.isfile(PICTURES_DIR / f) and (f.startswith(format_part + "_") or f.startswith(format_part + "."))]
+        return {"success": True, "files": sorted(files), "count": len(files)}
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error listing pictures for part %s: %s", format_part, e)
+        raise HTTPException(status_code=500, detail="Error retrieving pictures for part")
+
+
+def _sanitize_part(part: str) -> str:
+    import re
+    cleaned = re.sub(r"[^A-Za-z0-9_\-]", "_", part.strip())[:100]
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Invalid format part")
+    return cleaned
+
+
+@app.post("/api/pictures/{format_part}")
+async def upload_picture(
+    format_part: str,
+    file: UploadFile | None = File(None),
+    image_base64: str | None = Form(None),
+):
+    """Upload a picture for a specific format part.
+
+    Supports either multipart file upload (preferred) or a base64 encoded
+    data URL passed via form field `image_base64` (e.g. from a camera capture).
+    The stored filename pattern: {format_part}_{timestamp}.{ext}
+    """
+    import base64
+    import secrets
+    import mimetypes
+    from datetime import datetime
+
+    part_clean = _sanitize_part(format_part)
+
+    if not (file or image_base64):
+        raise HTTPException(status_code=400, detail="No image provided (file or image_base64 required)")
+
+    if not PICTURES_DIR.exists():
+        if not _ensure_pictures_dir():
+            raise HTTPException(status_code=500, detail="Pictures directory unavailable")
+
+    # Determine content & extension
+    content: bytes
+    ext = "jpg"
+
+    if file:
+        try:
+            content = await file.read()
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}")
+        # Guess extension from filename or content type
+        orig_name = file.filename or "upload"
+        if "." in orig_name:
+            ext_candidate = orig_name.rsplit(".", 1)[1].lower()
+            if len(ext_candidate) <= 5:
+                ext = ext_candidate
+        elif file.content_type:
+            guessed_ext = mimetypes.guess_extension(file.content_type) or ".jpg"
+            ext = guessed_ext.lstrip('.')
+    else:
+        # Handle base64 data URL or raw base64
+        b64 = image_base64.strip()
+        if b64.startswith("data:"):
+            # data:image/png;base64,XXXX
+            try:
+                header, b64data = b64.split(",", 1)
+                if ";base64" in header:
+                    if "image/" in header:
+                        mime = header.split(";")[0].split(":", 1)[1]
+                        guessed_ext = mimetypes.guess_extension(mime) or ".png"
+                        ext = guessed_ext.lstrip('.')
+                    content = base64.b64decode(b64data)
+                else:
+                    raise ValueError("Not a base64 data URL")
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=f"Invalid data URL: {e}")
+        else:
+            # Raw base64 assumed jpeg
+            try:
+                content = base64.b64decode(b64)
+                ext = "jpg"
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}")
+
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty image content")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    rand = secrets.token_hex(4)
+    filename = f"{part_clean}_{timestamp}_{rand}.{ext}"
+    dest = PICTURES_DIR / filename
+
+    try:
+        with open(dest, "wb") as f:
+            f.write(content)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to write picture %s: %s", dest, e)
+        raise HTTPException(status_code=500, detail="Failed to save image")
+
+    logger.info("Uploaded picture for %s: %s (%d bytes)", part_clean, filename, len(content))
+
+    return {"success": True, "filename": filename, "format_part": part_clean, "size": len(content)}
+
 
 async def handle_direct_rfid_inventory_config_change(config):
     """Start/stop/restart des direkten RFID Inventory Pollings je nach Config.

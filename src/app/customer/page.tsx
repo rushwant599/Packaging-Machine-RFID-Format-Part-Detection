@@ -1,6 +1,6 @@
 "use client";
 import Header from "@/components/Header";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { apiClient } from "@/lib/api-client";
 
 // -------------------- Typdefinitionen --------------------
@@ -176,7 +176,7 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
 }
 
 export default function CustomerPage() {
-  const { isMobile, isTablet } = useViewport();
+  const { isMobile, isTablet, width } = useViewport();
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
@@ -195,7 +195,33 @@ export default function CustomerPage() {
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
   // Layout / Style Konstanten für den Step-Block (responsive)
-  const STEP_FONT_SIZE = isMobile ? '.75rem' : (isTablet ? '.85rem' : '.95rem');
+  // Dynamische Schriftgröße anhand verfügbarer Breite (clamp Logik)
+  const STEP_FONT_SIZE = React.useMemo(() => {
+    if (width < 380) return '.58rem';
+    if (width < 440) return '.62rem';
+    if (width < 520) return '.68rem';
+    if (width < 640) return '.72rem';
+    if (width < 820) return '.8rem';
+    if (width < 1100) return '.88rem';
+    return '.95rem';
+  }, [width]);
+  // Tabellen-Skalierung (horizontale Anpassung): skaliert Tabelle proportional, wenn sie breiter ist als Container
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const [tableScale, setTableScale] = useState(1);
+  const compactTable = width < 560; // Kompakter Modus: volle Breite, Wrap statt horizontalem Scroll
+  useLayoutEffect(() => {
+    if (compactTable) { setTableScale(1); return; }
+    const cont = tableContainerRef.current;
+    const tbl = tableRef.current;
+    if (!cont || !tbl) return;
+    const available = cont.clientWidth;
+    const natural = tbl.scrollWidth;
+    if (natural === 0) return;
+    const scale = available / natural;
+    const clamped = scale < 1 ? Math.max(scale, 0.55) : 1;
+    setTableScale(clamped);
+  }, [width, isMobile, isTablet, STEP_FONT_SIZE, compactTable]);
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
   const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
@@ -618,56 +644,71 @@ export default function CustomerPage() {
                   )}
                 </div>
                 {current.kind === 'data' && current.headerCells && (
-                  <div style={{ width:'100%', overflowX: 'auto' }}>
-                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: 'fixed', minWidth: isMobile ? 700 : 'auto' }}>
-                    {COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
-                      <colgroup>
-                        {COLUMN_WIDTHS.map((w, i) => {
-                          const colKey = `col_${current.headerCells?.[i] || i}`;
-                          return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
-                        })}
-                        {current._rfidStatus && <col style={{ width: '6%' }} />}
-                      </colgroup>
+                  <div ref={tableContainerRef} style={{ width:'100%', position:'relative' }}>
+                    <div
+                      style={compactTable ? { width:'100%' } : { transform:`scale(${tableScale})`, transformOrigin:'left top', width: tableScale < 1 ? `${100 / tableScale}%` : '100%', transition:'transform .15s ease-out' }}>
+                      <table ref={tableRef} style={{ borderCollapse:'collapse', width:'100%', fontSize:STEP_FONT_SIZE, color:'#111', tableLayout: compactTable ? 'auto':'fixed', minWidth: compactTable ? 'auto':650 }}>
+                        {!compactTable && COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
+                          <colgroup>
+                            {COLUMN_WIDTHS.map((w,i)=>{
+                              const colKey = `col_${current.headerCells?.[i] || i}`;
+                              return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
+                            })}
+                            {current._rfidStatus && <col style={{ width:'6%' }} />}
+                          </colgroup>
+                        )}
+                        <thead>
+                          <tr>
+                            {current.headerCells.map((h:string)=>{
+                              const key = 'h_'+(h||'').toString().trim().toLowerCase().replace(/\s+/g,'_');
+                              const widthAuto = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
+                              return <th key={key} style={{ border:'1px solid #b7b7b7', padding:'6px 6px', background:'#e9ecef', textAlign:'left', fontWeight:600, overflow: compactTable ? 'visible':'hidden', textOverflow: compactTable ? 'clip':'ellipsis', whiteSpace: compactTable ? 'normal':'nowrap', width: widthAuto, color:'#222', fontSize:STEP_FONT_SIZE, lineHeight:1.15 }}>{h}</th>;
+                            })}
+                            {current._rfidStatus && <th style={{ border:'1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize:STEP_FONT_SIZE }}>RFID</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            {current.cells.map((c:string,i:number)=>{
+                              const key = 'c_'+(c||'').toString().trim().toLowerCase().replace(/\s+/g,'_')+'_'+i;
+                              const injected = current._injectedValue && [2,3,4].includes(i);
+                              const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
+                              const changed = diffMode && fromVal !== undefined && fromVal !== c && [2,3,4].includes(i);
+                              const cellStyle: React.CSSProperties = {
+                                border:'1px solid #c5c5c5',
+                                padding:'6px 6px',
+                                background: changed ? '#ffe8e6' : (injected ? '#fff9e6':'#fff'),
+                                fontSize: STEP_FONT_SIZE,
+                                overflow: compactTable ? 'visible':'hidden',
+                                textOverflow: compactTable ? 'clip':'ellipsis',
+                                whiteSpace: compactTable ? 'normal':'nowrap',
+                                wordBreak: compactTable ? 'break-word':'normal',
+                                fontWeight: changed ? 700 : (injected ? 600:400),
+                                color:'#111',
+                                lineHeight:1.25,
+                                verticalAlign:'top'
+                              };
+                              return <td key={key} style={cellStyle}>
+                                {changed ? (
+                                  <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                                    <span>{c}</span>
+                                    {fromVal && <span style={{ fontSize:'0.55rem', color:'#b00', fontWeight:500 }}>alt: {fromVal}</span>}
+                                  </div>
+                                ) : c}
+                              </td>;
+                            })}
+                            {current._rfidStatus && (()=>{
+                              const rs = current._rfidStatus; let rfidColor = '#666'; if (rs.tagId) rfidColor = rs.seen ? '#0a7a15':'#b30000';
+                              let titleText: string; if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`; else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`; else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                              return <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize:STEP_FONT_SIZE, fontWeight:700, color:rfidColor }} title={titleText}>{rs.symbol}</td>;
+                            })()}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    {!compactTable && tableScale < 1 && (
+                      <div style={{ position:'absolute', right:4, bottom:4, background:'rgba(0,0,0,0.55)', color:'#fff', padding:'2px 6px', borderRadius:4, fontSize:'.55rem', letterSpacing:'.05em' }}>Skaliert {Math.round(tableScale*100)}%</div>
                     )}
-                    <thead>
-                      <tr>
-                        {current.headerCells.map((h: string) => {
-                          const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
-                          const width = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
-                          return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width, color:'#222', fontSize: STEP_FONT_SIZE }}>{h}</th>;
-                        })}
-                        {current._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {current.cells.map((c: string, i: number) => {
-                          const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
-                          const injected = current._injectedValue && [2,3,4].includes(i);
-                          const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
-                          const changed = diffMode && fromVal !== undefined && fromVal !== c && [2,3,4].includes(i);
-                          return <td key={key} style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: changed ? '#ffe8e6' : (injected ? '#fff9e6' : '#fff'), fontSize: STEP_FONT_SIZE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: changed ? 700 : (injected ? 600 : 400), color: '#111', position:'relative' }}>
-                            {c}
-                            {changed && fromVal && <span style={{ position:'absolute', left:4, bottom:2, fontSize:'0.55rem', color:'#b00', fontWeight:500 }}>alt: {fromVal}</span>}
-                          </td>;
-                        })}
-                        {current._rfidStatus && (() => {
-                          const rs = current._rfidStatus;
-                          let rfidColor = '#666';
-                          if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
-                          let titleText: string;
-                          if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`;
-                          else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
-                          else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
-                          return (
-                            <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize: STEP_FONT_SIZE, fontWeight:700, color: rfidColor }} title={titleText}>
-                              {rs.symbol}
-                            </td>
-                          );
-                        })()}
-                      </tr>
-                    </tbody>
-                  </table>
                   </div>
                 )}
               </div>

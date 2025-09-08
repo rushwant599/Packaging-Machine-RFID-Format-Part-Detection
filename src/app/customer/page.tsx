@@ -433,7 +433,12 @@ export default function CustomerPage() {
     let closed = false;
     const connect = () => {
       try {
-        const baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+        let baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+        if (!baseHttp) {
+          const { protocol, hostname } = window.location;
+          const port = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
+          baseHttp = `${protocol}//${hostname}:${port}`;
+        }
         const base = baseHttp.replace(/^http/, 'ws');
         const url = `${base}/ws/opc-ua`;
         ws = new WebSocket(url);

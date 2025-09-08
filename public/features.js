@@ -2,13 +2,40 @@ let rfidTags = [];
 let formatParts = []; // Dynamic format parts from API
 let assignments = {}; // Format part -> RFID tag assignments from database
 
-// API configuration
-const API_BASE_URL = 'http://localhost:8001';
+// API configuration (dynamic for LAN/mobile): http(s)://<current-host>:8001
+const API_BASE_URL = (() => {
+  try {
+    const { protocol, hostname } = window.location;
+    const port = '8001';
+    return `${protocol}//${hostname}:${port}`;
+  } catch {
+    return 'http://localhost:8001';
+  }
+})();
 
 // Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'
 function sanitizeFormatPartId(id) {
   if (id == null) return '';
   return String(id).trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
+}
+
+function isLocalhostHost(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
+}
+
+function isSecureForCamera() {
+  // getUserMedia requires a secure context (HTTPS) except on localhost
+  try {
+    if (typeof window !== 'undefined') {
+  const { protocol, hostname } = window.location;
+      if (window.isSecureContext) return true;
+      if (protocol === 'https:') return true;
+      if (isLocalhostHost(hostname)) return true;
+      // Also allow when served via http but behind a reverse proxy that terminates TLS and forwards as http with private IP
+      // In such cases, browsers still block camera on http, so return false to show guidance.
+    }
+  } catch {}
+  return false;
 }
 
 async function loadFormatParts() {
@@ -407,8 +434,18 @@ async function handleFileSelected(ev) {
 async function toggleCamera() {
   const video = document.getElementById('camera');
   if (!video) return;
+  const status = document.getElementById('upload-status');
   if (mediaStream) {
     stopCamera();
+    return;
+  }
+  // Security and API availability checks
+  if (!isSecureForCamera()) {
+    if (status) status.textContent = 'Kamera benötigt HTTPS oder localhost. Bitte App über https://<deine-ip>:3000 öffnen oder Datei-Upload verwenden.';
+    return;
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    if (status) status.textContent = 'Kamera-API nicht verfügbar. Bitte HTTPS verwenden oder Datei-Upload nutzen.';
     return;
   }
   try {
@@ -418,7 +455,7 @@ async function toggleCamera() {
     document.getElementById('camera-controls').style.display = 'flex';
     document.getElementById('camera-btn').textContent = 'Kamera läuft';
   } catch (e) {
-    document.getElementById('upload-status').textContent = 'Kamera Fehler: ' + e;
+    if (status) status.textContent = 'Kamera Fehler: ' + e;
   }
 }
 

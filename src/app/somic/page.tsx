@@ -37,7 +37,16 @@ const defaultConfig: Config = {
   RFID_INVENTORY_INTERVAL_SEC: 1,
 };
 
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
+const backendUrl = ((): string => {
+  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (envUrl && envUrl.trim()) return envUrl;
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname } = window.location;
+    const port = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+    return `${protocol}//${hostname}:${port}`;
+  }
+  return "http://localhost:8001";
+})();
 
 export default function SomicPage() {
   const [password, setPassword] = useState("");

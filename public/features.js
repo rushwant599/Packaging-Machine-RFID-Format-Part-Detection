@@ -5,6 +5,12 @@ let assignments = {}; // Format part -> RFID tag assignments from database
 // API configuration
 const API_BASE_URL = 'http://localhost:8001';
 
+// Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'
+function sanitizeFormatPartId(id) {
+  if (id == null) return '';
+  return String(id).trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
+}
+
 async function loadFormatParts() {
   try {
     console.log('Loading format parts from API...');
@@ -267,16 +273,30 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function showPicture(id) {
-  const response = await fetch(`${API_BASE_URL}/api/pictures`);
-  const pictures = await response.json();
+  try {
+  const safeId = sanitizeFormatPartId(id);
+  const resp = await fetch(`${API_BASE_URL}/api/pictures/by-part/${safeId}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    let files = [];
+    if (Array.isArray(data)) {
+      files = data;
+    } else if (data && Array.isArray(data.files)) {
+      files = data.files;
+    } else if (data && typeof data.filename === 'string') {
+      files = [data.filename];
+    }
 
-  matchedPictures = pictures.filter(pic => pic.split('.')[0].startsWith(id));
-
-  if (matchedPictures.length > 0) {
-    currentIndex = 0;
-    showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
-  } else {
-    console.warn("No picture found for ", id);
+    matchedPictures = files;
+    if (matchedPictures.length > 0) {
+      currentIndex = 0;
+      showPictureFullScreen(`${API_BASE_URL}/pictures/${encodeURIComponent(matchedPictures[currentIndex])}`);
+    } else {
+      console.warn("No picture found for", id);
+      hidePicture();
+    }
+  } catch (e) {
+    console.error('Error loading pictures for part', id, e);
     hidePicture();
   }
 }
@@ -299,13 +319,13 @@ function hidePicture() {
 function showPrevious() {
   if (matchedPictures.length === 0) return;
   currentIndex = (currentIndex - 1 + matchedPictures.length) % matchedPictures.length;
-  showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
+  showPictureFullScreen(`${API_BASE_URL}/pictures/${encodeURIComponent(matchedPictures[currentIndex])}`);
 }
 
 function showNext() {
   if (matchedPictures.length === 0) return;
   currentIndex = (currentIndex + 1) % matchedPictures.length;
-  showPictureFullScreen(`${API_BASE_URL}/pictures/${matchedPictures[currentIndex]}`);
+  showPictureFullScreen(`${API_BASE_URL}/pictures/${encodeURIComponent(matchedPictures[currentIndex])}`);
 }
 
 // Picture Upload (File or Camera)

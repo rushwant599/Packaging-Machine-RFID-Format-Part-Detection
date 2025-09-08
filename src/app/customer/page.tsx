@@ -178,6 +178,14 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
 export default function CustomerPage() {
   const { isMobile, isTablet, width } = useViewport();
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  // Upload/Kamera State
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadPartId, setUploadPartId] = useState<string | null>(null);
+  const [uploadMsg, setUploadMsg] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   // Anleitung standardmäßig ausgeblendet
@@ -507,6 +515,125 @@ export default function CustomerPage() {
     });
   }, [enrichedSteps, assignments, liveEventTagIds]);
 
+  // --- Upload & Kamera Helpers/Handlers (after dependencies) ---
+  const sanitizePart = useCallback((s: string) => s.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100), []);
+  const isSecureForCamera = useCallback(() => {
+    if (typeof window === 'undefined') return false;
+    const { protocol, hostname } = window.location;
+    return protocol === 'https:' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (mediaStream) {
+      try { mediaStream.getTracks().forEach(t => t.stop()); } catch {}
+    }
+    if (videoRef.current) {
+      try { (videoRef.current as HTMLVideoElement).srcObject = null; } catch {}
+    }
+    setMediaStream(null);
+  }, [mediaStream]);
+
+  const closeUpload = useCallback(() => {
+    stopCamera();
+    setUploadOpen(false);
+    setUploadMsg("");
+  }, [stopCamera]);
+
+  const onFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const files = e.target.files;
+      if (!files || files.length === 0) { setUploadMsg('Keine Datei gewählt.'); return; }
+      const file = files[0];
+      if (!uploadPartId) { setUploadMsg('Kein Formatteil ausgewählt.'); return; }
+      const part = sanitizePart(uploadPartId);
+      const form = new FormData();
+      form.append('file', file);
+      setUploadMsg('Lade hoch…');
+      const resp = await fetch(`${BACKEND_URL}/api/pictures/${encodeURIComponent(part)}`, { method: 'POST', body: form });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Upload fehlgeschlagen (${resp.status}): ${txt || resp.statusText}`);
+      }
+      const json = await resp.json() as { success?: boolean; filename?: string };
+      if (!json?.success || !json.filename) throw new Error('Unerwartete Antwort vom Server');
+      setUploadMsg(`Upload erfolgreich: ${json.filename}`);
+      // Bildliste aktualisieren (zeige neuestes Bild)
+      picturesCacheRef.current.set(part, [json.filename]);
+      // Wenn aktueller Step zum gleichen Part gehört, aktualisieren
+      const curKey = derivePicturePartKey(stepsWithStatus[currentStep]);
+      if (curKey && sanitizePart(curKey) === part) {
+        setCurrentPictures([json.filename]);
+      }
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadMsg(`Fehler: ${msg}`);
+    }
+  }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart]);
+
+  const toggleCamera = useCallback(async () => {
+    try {
+      if (mediaStream) { setUploadMsg('Kamera bereits aktiv.'); return; }
+      if (!isSecureForCamera()) {
+        setUploadMsg('Kamera benötigt HTTPS oder localhost. Bitte die Seite über https://<ip>:3000 öffnen.');
+        return;
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setUploadMsg('Kamera API nicht verfügbar.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      if (videoRef.current) {
+        (videoRef.current as HTMLVideoElement).srcObject = stream;
+      }
+      setMediaStream(stream);
+      setUploadMsg('Kamera gestartet.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadMsg(`Kamera-Fehler: ${msg}`);
+    }
+  }, [mediaStream, isSecureForCamera]);
+
+  const takeSnapshot = useCallback(async () => {
+    try {
+      if (!mediaStream || !videoRef.current) { setUploadMsg('Kamera nicht aktiv.'); return; }
+      if (!uploadPartId) { setUploadMsg('Kein Formatteil ausgewählt.'); return; }
+      const video = videoRef.current as HTMLVideoElement;
+      const canvas = canvasRef.current as HTMLCanvasElement | null;
+      if (!canvas) { setUploadMsg('Kein Canvas verfügbar.'); return; }
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { setUploadMsg('Canvas Kontext fehlt.'); return; }
+      ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const part = sanitizePart(uploadPartId);
+      const form = new FormData();
+      form.append('image_base64', dataUrl);
+      setUploadMsg('Speichere Foto…');
+      const resp = await fetch(`${BACKEND_URL}/api/pictures/${encodeURIComponent(part)}`, { method: 'POST', body: form });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Upload fehlgeschlagen (${resp.status}): ${txt || resp.statusText}`);
+      }
+      const json = await resp.json() as { success?: boolean; filename?: string };
+      if (!json?.success || !json.filename) throw new Error('Unerwartete Antwort vom Server');
+      setUploadMsg(`Foto gespeichert: ${json.filename}`);
+      // Update pictures
+      picturesCacheRef.current.set(part, [json.filename]);
+      const curKey = derivePicturePartKey(stepsWithStatus[currentStep]);
+      if (curKey && sanitizePart(curKey) === part) {
+        setCurrentPictures([json.filename]);
+      }
+      stopCamera();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploadMsg(`Fehler: ${msg}`);
+    }
+  }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera]);
+
   // Separater Satz für Statistik: im diffMode immer komplette Ziel-Format-Injektion statt gefilterter Unterschiede
   const statsStepsWithStatus: Step[] = React.useMemo(() => {
     if (!(diffMode && toFormat && toFormat !== fromFormat)) {
@@ -639,7 +766,7 @@ export default function CustomerPage() {
         <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
             <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
-            <button onClick={()=>setShowSteps(s=>!s)} style={{ fontSize:'.65rem', padding:'4px 8px', border:'1px solid #bbb', background:'#fff', borderRadius:4, cursor:'pointer' }}>
+            <button onClick={()=>setShowSteps(s=>!s)} style={{ fontSize:'.65rem', padding:'4px 8px', border:'1px solid #bbb', background:'#fff', borderRadius:4, cursor:'pointer', color:'#000' }}>
               {showSteps ? 'Anleitung verbergen' : 'Anleitung anzeigen'}
             </button>
           </div>
@@ -783,6 +910,17 @@ export default function CustomerPage() {
                   if (!key) return null; // kein echtes Formatteil
                   return (
                     <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {/* Upload/Aktionen */}
+                      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => { setUploadPartId(key); setUploadOpen(true); setUploadMsg(""); }}
+                          style={{ fontSize: '.7rem', padding:'4px 8px', background:'#f4f4f4', color:'#000', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}
+                        >Upload</button>
+                        {uploadOpen && uploadPartId === key && (
+                          <span style={{ fontSize:'.65rem', color:'#000' }}>{uploadMsg}</span>
+                        )}
+                      </div>
                       {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color:'#555' }}>Lade Bild…</div>}
                       {!pictureLoading && currentPictures.length > 0 && (
                         <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
@@ -859,6 +997,36 @@ export default function CustomerPage() {
               alt="Vorschau"
               style={{ maxWidth:'100%', maxHeight:'90vh', objectFit:'contain', borderRadius:6, boxShadow:'0 4px 18px rgba(0,0,0,0.4)' }}
             />
+          </div>
+        </div>
+      )}
+      {/* Upload Modal */}
+      {uploadOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={()=>closeUpload()}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10000 }}
+        >
+          <div onClick={e=>e.stopPropagation()} style={{ background:'#fff', borderRadius:8, padding:16, minWidth:280, maxWidth:'90vw', display:'flex', flexDirection:'column', gap:10 }}>
+            <h3 style={{ margin:0, fontSize:'1rem',color:'#000' }}>Upload Bild{uploadPartId ? ` für ${uploadPartId}`: ''}</h3>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display:'none' }} onChange={onFileSelected} />
+              <button type="button" onClick={()=>fileInputRef.current?.click()} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Datei wählen</button>
+              <button type="button" onClick={toggleCamera} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>{mediaStream ? 'Kamera läuft' : 'Kamera'}</button>
+              <button type="button" onClick={()=>closeUpload()} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Schließen</button>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <video ref={videoRef} autoPlay playsInline style={{ display: mediaStream ? 'block':'none', maxWidth:'80vw', maxHeight:'40vh', border:'1px solid #ddd', borderRadius:4 }} />
+              <canvas ref={canvasRef} style={{ display:'none' }} />
+              {mediaStream && (
+                <div style={{ display:'flex', gap:8 }}>
+                  <button type="button" onClick={takeSnapshot} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Foto aufnehmen</button>
+                  <button type="button" onClick={stopCamera} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Kamera stoppen</button>
+                </div>
+              )}
+            </div>
+            <div style={{ minHeight:18, fontSize:'.8rem', color:'#000' }}>{uploadMsg}</div>
           </div>
         </div>
       )}

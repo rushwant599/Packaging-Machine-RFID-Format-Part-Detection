@@ -72,17 +72,11 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
    docker-compose up --build
    ```
 
-   Use nginx and a cert:
+   **Use nginx** 
    ```bash
-   docker run -d -p 3000:3000 -p 8001:8001 --env-file .env.example.copy -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
-   
-   docker run -d --name my-nginx -p 80:80 -p 443:443 -v $PWD/certs:/etc/nginx/certs:ro -v $PWD/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine          
+   docker run -d -p 4433:443 --env-file .env.example.copy -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
    ```
-   -> install mkcert
-   "mkcert -install"
-   "mkcert IP-Adress"
-   nginx config anpassen
-   
+   replaces old start command
 ---
 
 ## Developer Guide

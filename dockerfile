@@ -1,71 +1,58 @@
-# Multi-stage Dockerfile for Next.js Frontend + Python Backend
-
-# Python Backend Stage
-FROM python:3.13-slim AS backend-builder
-WORKDIR /app/backend
-
-# Install Python dependencies
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy backend source
-COPY backend/ ./
-
-# Node.js Frontend Stage
-FROM node:22.19.0-alpine AS frontend-builder
+# --- Stage 1: Frontend build (Next.js) ---
+FROM node:20-bookworm-slim AS frontend-build
 WORKDIR /app
-
-# Install Node.js dependencies
-COPY package.json package-lock.json ./
-RUN npm ci
-
-# Copy frontend source and build
-COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+COPY package*.json ./
+RUN npm ci --include=dev
+COPY . .
 RUN npm run build
 
-# Remove dev dependencies
-RUN npm prune --omit=dev
+# --- Stage 2: Python wheels bauen ---
+FROM python:3.11-slim AS py-build
+WORKDIR /app
+COPY backend/ backend/
+RUN python -m pip install --upgrade pip wheel && \
+    pip wheel --no-cache-dir -r backend/requirements.txt -w /wheels
 
-# Final Runtime Stage
-FROM python:3.13-slim AS runner
+# --- Stage 3: Runtime (Node + Python + Nginx) ---
+FROM node:20-bookworm-slim
+ENV NODE_ENV=production
 WORKDIR /app
 
-# Install Node.js in the Python container
-RUN apt-get update && apt-get install -y \
-    curl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean \
+# Laufzeit-Pakete
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-venv nginx-light dumb-init ca-certificates gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY --from=backend-builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
-COPY --from=backend-builder /usr/local/bin /usr/local/bin
+# Prod-Dependencies für Next (next start)
+COPY --from=frontend-build /app/package*.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
-# Copy backend files
-COPY --from=backend-builder /app/backend ./backend
+# Build-Output + public Assets
+COPY --from=frontend-build /app/.next ./.next
+COPY --from=frontend-build /app/public ./public
 
-# Copy frontend build
-COPY --from=frontend-builder /app/.next ./.next
-COPY --from=frontend-builder /app/public ./public
-COPY --from=frontend-builder /app/package.json ./package.json
-COPY --from=frontend-builder /app/node_modules ./node_modules
+# Backend + Daten + Certs
+COPY backend/ ./backend
+COPY certs/ /etc/nginx/certs/
 
-# Copy startup scripts
-COPY docker-entrypoint.sh ./
-COPY .env.example* ./
+# Python venv + Wheels
+RUN python3 -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+COPY --from=py-build /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r backend/requirements.txt && \
+    rm -rf /wheels && \
+    find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} +
 
-# Set environment variables
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PYTHONPATH=/app/backend
+# Nginx-Template + Entrypoint
+COPY nginx.conf /etc/nginx/templates/nginx.conf.template
+COPY docker-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Expose ports
-EXPOSE 3000 8001
+ENV HOST=0.0.0.0
+ENV PORT=3000
+EXPOSE 443
 
-# Make entrypoint executable
-RUN chmod +x docker-entrypoint.sh
-
-# Start both services
-CMD ["./docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/entrypoint.sh"]

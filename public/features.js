@@ -1,13 +1,28 @@
+// Expose env var to window for runtime access (if available)
+if (typeof window !== 'undefined' && typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_BACKEND_URL) {
+  window.NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+}
 let rfidTags = [];
 let formatParts = []; // Dynamic format parts from API
 let assignments = {}; // Format part -> RFID tag assignments from database
 
-// API configuration (dynamic for LAN/mobile): http(s)://<current-host>:8001
+// API configuration: Use NEXT_PUBLIC_BACKEND_URL as-is if set, otherwise fallback to dynamic window.location logic
 const API_BASE_URL = (() => {
+  // Prefer env var if set (for Nginx/SSL)
+  if (typeof window !== 'undefined' && window.NEXT_PUBLIC_BACKEND_URL) {
+    return window.NEXT_PUBLIC_BACKEND_URL;
+  }
+  if (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL;
+  }
   try {
-    const { protocol, hostname } = window.location;
-    const port = '8001';
-    return `${protocol}//${hostname}:${port}`;
+    const { protocol, hostname, port } = window.location;
+    if (protocol === 'https:') {
+      const usePort = port && port !== '443' ? `:${port}` : '';
+      return `${protocol}//${hostname}${usePort}`;
+    }
+    const usePort = (port === '3000' || port === '3001' || !port || port === '80') ? '8001' : port;
+    return `${protocol}//${hostname}:${usePort}`;
   } catch {
     return 'http://localhost:8001';
   }

@@ -1,7 +1,7 @@
 "use client";
 import Header from "@/components/Header";
 import { useState, useEffect, useRef } from "react";
-import { useAPI } from "@/lib/api-client";
+import { useAPI, BACKEND_URL } from "@/lib/api-client";
 
 type Config = {
   OPC_UA_SERVER_URL: string;
@@ -37,16 +37,7 @@ const defaultConfig: Config = {
   RFID_INVENTORY_INTERVAL_SEC: 1,
 };
 
-const backendUrl = ((): string => {
-  const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (envUrl && envUrl.trim()) return envUrl;
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    const port = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
-    return `${protocol}//${hostname}:${port}`;
-  }
-  return "http://localhost:8001";
-})();
+const backendUrl = BACKEND_URL;
 
 export default function SomicPage() {
   const [password, setPassword] = useState("");
@@ -158,7 +149,7 @@ export default function SomicPage() {
             </label>
             <input
               type="password"
-              className="w-full px-2 py-2 border rounded text-white"
+              className="w-full px-2 py-2 border rounded text-black dark:text-white"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoFocus

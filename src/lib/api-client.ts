@@ -3,13 +3,47 @@
 // Lösung: Falls NEXT_PUBLIC_BACKEND_URL nicht gesetzt ist, dynamisch die Host-IP/Domain des Frontends nutzen.
 // Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
-const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
 if (!resolvedBase && typeof window !== 'undefined') {
-  const { protocol, hostname } = window.location;
-  resolvedBase = `${protocol}//${hostname}:${backendPort}`;
+  const { protocol, hostname, port } = window.location;
+  if (protocol === 'https:') {
+    // Unter Nginx/SSL: gleiche Origin nutzen (Standardport auslassen)
+    const usePort = port && port !== '443' ? `:${port}` : '';
+    resolvedBase = `${protocol}//${hostname}${usePort}`;
+  } else {
+    // Lokaler Dev ohne Nginx: Backend läuft auf 8001, Frontend auf 3000/3001
+    const usePort = (port === '3000' || port === '3001' || !port || port === '80') ? '8001' : port;
+    resolvedBase = `${protocol}//${hostname}:${usePort}`;
+  }
 }
 // Fallback (Dev Einzelstart): localhost
 export const BACKEND_URL = resolvedBase || 'http://localhost:8001';
+
+// WebSocket-URL-Helper: passt sich immer der API-URL an (wss/ws, Port nur wenn nötig)
+export function getWebSocketUrl(path = '/ws/opc-ua') {
+  let base = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!base && typeof window !== 'undefined') {
+    const { protocol, hostname, port } = window.location;
+    const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
+    if (protocol === 'https:') {
+      const usePort = port && port !== '443' ? `:${port}` : '';
+      base = `${wsProto}//${hostname}${usePort}`;
+    } else {
+      const usePort = (port === '3000' || port === '3001' || !port || port === '80') ? '8001' : port;
+      base = `${wsProto}//${hostname}:${usePort}`;
+    }
+  } else if (base) {
+    base = base.replace(/^http/, 'ws');
+    // Port entfernen, wenn Standardport und nicht explizit gesetzt
+    try {
+      const url = new URL(base);
+      if ((url.protocol === 'wss:' && url.port === '443') || (url.protocol === 'ws:' && url.port === '80')) {
+        url.port = '';
+      }
+      base = url.toString().replace(/\/$/, '');
+    } catch {}
+  }
+  return `${base}${path}`;
+}
 // Optional: kurze Debug-Ausgabe einmalig
 declare global {
   interface Window { __BACKEND_URL_LOGGED__?: boolean }
@@ -17,7 +51,6 @@ declare global {
 if (typeof window !== 'undefined' && !window.__BACKEND_URL_LOGGED__) {
   window.__BACKEND_URL_LOGGED__ = true;
   // bewusstes Logging für einmalige Debug-Info
-  // eslint-disable-next-line no-console
   console.log('[api-client] BACKEND_URL =', BACKEND_URL);
 }
 

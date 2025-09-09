@@ -49,6 +49,7 @@ htmlcov/
 # Environment Files
 .env*
 !.env.example
+!.env.example.copy
 backend/.env
 .env.local
 .env.development.local
@@ -57,7 +58,7 @@ backend/.env
 
 # Cache & Temporary Files
 .DS_Store
-*.pem
+#*.pem
 .turbo/
 *.log
 npm-debug.log*
@@ -125,6 +126,6 @@ coverage/
 # Certificates & Keys
 *.key
 *.crt
-*.pem
+#*.pem
 certificates/
 backend/test.py

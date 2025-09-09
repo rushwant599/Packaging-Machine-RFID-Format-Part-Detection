@@ -1,7 +1,7 @@
 "use client";
 import Header from "@/components/Header";
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
-import { apiClient, BACKEND_URL } from "@/lib/api-client";
+import { apiClient, BACKEND_URL, getWebSocketUrl } from "@/lib/api-client";
 
 // -------------------- Typdefinitionen --------------------
 interface RowMeta {
@@ -441,14 +441,7 @@ export default function CustomerPage() {
     let closed = false;
     const connect = () => {
       try {
-        let baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
-        if (!baseHttp) {
-          const { protocol, hostname } = window.location;
-          const port = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-          baseHttp = `${protocol}//${hostname}:${port}`;
-        }
-        const base = baseHttp.replace(/^http/, 'ws');
-        const url = `${base}/ws/opc-ua`;
+        const url = getWebSocketUrl('/ws/opc-ua');
         ws = new WebSocket(url);
         ws.onmessage = (ev: MessageEvent) => {
           try {

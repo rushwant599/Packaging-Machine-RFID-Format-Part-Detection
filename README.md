@@ -63,11 +63,16 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
    ```bash
    docker build -t format-rfidparts .
    ```
-2. **Start the container:**
+2. **Start the container (HTTP debug ports):**
    ```bash
    docker run -d -p 3000:3000 -p 8001:8001 --env-file .env.example -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
    ```
-3. **Or with Docker Compose:**
+   or enable HTTPS via bundled Nginx reverse proxy on port 443:
+   ```bash
+   docker run -d -p 443:443 --env-file .env.example -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
+   ```
+   Certificates under `certs/` are copied into the image. Adjust `SERVER_IP` to match your host.
+3. **Or with Docker Compose (HTTPS on :443 + debug ports):**
    ```bash
    docker-compose up --build
    ```

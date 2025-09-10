@@ -2,12 +2,15 @@ let rfidTags = [];
 let formatParts = []; // Dynamic format parts from API
 let assignments = {}; // Format part -> RFID tag assignments from database
 
-// API configuration (dynamic for LAN/mobile): http(s)://<current-host>:8001
+// API configuration: prefer same-origin under HTTPS/nginx, else dev fallback to :8001
 const API_BASE_URL = (() => {
   try {
-    const { protocol, hostname } = window.location;
-    const port = '8001';
-    return `${protocol}//${hostname}:${port}`;
+    const { protocol, hostname, port } = window.location;
+    const isStandard = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
+    if (protocol === 'https:' || isStandard) {
+      return `${protocol}//${hostname}`; // nginx reverse proxy
+    }
+    return `${protocol}//${hostname}:8001`; // local dev direct backend
   } catch {
     return 'http://localhost:8001';
   }

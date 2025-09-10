@@ -1,5 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
@@ -338,6 +340,18 @@ async def lifespan(app: FastAPI):
         await opc_manager.stop_monitoring()
 
 app = FastAPI(title="RFID Parts Backend", version="1.0.0", lifespan=lifespan)
+
+# Allow all hosts (we're behind nginx / container)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+class ForwardedProtoMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        proto = request.headers.get("x-forwarded-proto")
+        if proto:
+            request.scope["scheme"] = proto
+        return await call_next(request)
+
+app.add_middleware(ForwardedProtoMiddleware)
 
 import socket
 

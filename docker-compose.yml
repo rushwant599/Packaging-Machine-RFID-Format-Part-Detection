@@ -4,15 +4,16 @@ services:
   rfid-app:
     build: .
     ports:
-      - "3000:3000"   # Frontend
-      - "8001:8001"   # Backend API
+      - "3000:3000"   # Frontend (direct, for debug)
+      - "8001:8001"   # Backend API (direct, for debug)
+      - "443:443"     # HTTPS via Nginx
     env_file:
       - .env.example
     volumes:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health", "&&", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD-SHELL", "curl -fk https://localhost/api/health && curl -fk https://localhost"]
       interval: 30s
       timeout: 10s
       retries: 3

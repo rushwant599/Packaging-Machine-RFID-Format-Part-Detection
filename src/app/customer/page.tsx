@@ -443,9 +443,14 @@ export default function CustomerPage() {
       try {
         let baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
         if (!baseHttp) {
-          const { protocol, hostname } = window.location;
-          const port = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-          baseHttp = `${protocol}//${hostname}:${port}`;
+          const { protocol, hostname, port } = window.location;
+          const isStandardPort = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
+          if (protocol === 'https:' || isStandardPort) {
+            baseHttp = `${protocol}//${hostname}`;
+          } else {
+            const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
+            baseHttp = `${protocol}//${hostname}:${p}`;
+          }
         }
         const base = baseHttp.replace(/^http/, 'ws');
         const url = `${base}/ws/opc-ua`;

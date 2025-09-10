@@ -57,7 +57,7 @@ backend/.env
 
 # Cache & Temporary Files
 .DS_Store
-*.pem
+
 .turbo/
 *.log
 npm-debug.log*
@@ -125,6 +125,5 @@ coverage/
 # Certificates & Keys
 *.key
 *.crt
-*.pem
 certificates/
 backend/test.py

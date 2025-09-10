@@ -31,9 +31,13 @@ RUN npm prune --omit=dev
 FROM python:3.13-slim AS runner
 WORKDIR /app
 
-# Install Node.js in the Python container
+# Install Node.js and Nginx in the Python container
 RUN apt-get update && apt-get install -y \
     curl \
+    gnupg \
+    ca-certificates \
+    nginx \
+    gettext-base \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
@@ -55,17 +59,21 @@ COPY --from=frontend-builder /app/node_modules ./node_modules
 # Copy startup scripts
 COPY docker-entrypoint.sh ./
 COPY .env.example* ./
+COPY nginx/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+COPY certs /etc/nginx/certs
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PYTHONPATH=/app/backend
+ENV NGINX_SSL_CERT=/etc/nginx/certs/10.11.36.40.pem
+ENV NGINX_SSL_KEY=/etc/nginx/certs/10.11.36.40-key.pem
 
-# Expose ports
-EXPOSE 3000 8001
+# Expose ports (internal) and 443 for external HTTPS
+EXPOSE 3000 8001 443
 
 # Make entrypoint executable
 RUN chmod +x docker-entrypoint.sh
 
-# Start both services
+# Start all services (backend, frontend, nginx)
 CMD ["./docker-entrypoint.sh"]

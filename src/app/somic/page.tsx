@@ -41,9 +41,13 @@ const backendUrl = ((): string => {
   const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (envUrl && envUrl.trim()) return envUrl;
   if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    const port = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
-    return `${protocol}//${hostname}:${port}`;
+    const { protocol, hostname, port } = window.location;
+    const isStandard = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
+    if (protocol === 'https:' || isStandard) {
+      return `${protocol}//${hostname}`;
+    }
+    const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+    return `${protocol}//${hostname}:${p}`;
   }
   return "http://localhost:8001";
 })();

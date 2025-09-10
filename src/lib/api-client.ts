@@ -5,8 +5,15 @@
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
 const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
 if (!resolvedBase && typeof window !== 'undefined') {
-  const { protocol, hostname } = window.location;
-  resolvedBase = `${protocol}//${hostname}:${backendPort}`;
+  const { protocol, hostname, port } = window.location;
+  const isStandardPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
+  // If we're on HTTPS (nginx) or a standard port, prefer same-origin without explicit port
+  // Else (e.g., local dev on :3000) target the backend port explicitly
+  if (protocol === 'https:' || isStandardPort) {
+    resolvedBase = `${protocol}//${hostname}`;
+  } else {
+    resolvedBase = `${protocol}//${hostname}:${backendPort}`;
+  }
 }
 // Fallback (Dev Einzelstart): localhost
 export const BACKEND_URL = resolvedBase || 'http://localhost:8001';

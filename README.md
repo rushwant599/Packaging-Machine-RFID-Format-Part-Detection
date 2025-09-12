@@ -65,11 +65,11 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
    ```
 2. **Start the container (HTTP debug ports):**
    ```bash
-   docker run -d -p 3000:3000 -p 8001:8001 --env-file .env.example -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
+   docker run -d -p 3000:3000 -p 8001:8001 --env-file .env.example -v $PWD/data:/app/data format-rfidparts
    ```
    or enable HTTPS via bundled Nginx reverse proxy on port 443:
    ```bash
-   docker run -d -p 443:443 --env-file .env.example -v $PWD/data:/app/data -v $PWD/customer-html-cache.html:/app/customer-html-cache.html format-rfidparts
+   docker run -d -p 443:443 --env-file .env.example -v $PWD/data:/app/data format-rfidparts
    ```
    Certificates under `certs/` are copied into the image. Adjust `SERVER_IP` to match your host.
 3. **Or with Docker Compose (HTTPS on :443 + debug ports):**
@@ -95,7 +95,8 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
   - Configuration: `.env` or environment variables
 
 - **Persistence:**
-  - All RFID assignments are stored in `data/assignments.db` (created automatically on first start)
+   - All RFID assignments are stored in `data/assignments.db` (created automatically on first start)
+   - Cached customer HTML is stored at `data/customer-html-cache.html` (shared between frontend and backend)
 
 - **Testing:**
   - Frontend: `npm run lint`, build check
@@ -118,7 +119,7 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 | `/api/formats`                         | GET    | List all formats                    | `[ ... ]`                        |
 | `/api/format-parts-per-format`         | GET    | Format parts grouped by format      | `{ format: [parts] }`            |
 | `/api/rfid-opc-ua/status`              | GET    | RFID status                         | `...`                            |
-| `/api/rfid-opc-ua/value`               | GET    | RFID last value                     | `...`                            |   
+| `/api/rfid-opc-ua/value`               | GET    | RFID last value                     | `...`                            |
 | `/api/verify-password`                 | POST   | Password verification (admin)       | `{ valid: true/false }`          |
 | `/api/health`                          | GET    | Health check                        | `{ status: 'ok' }`               |
 | `/ws/opc-ua`                           | WS     | OPC UA WebSocket stream             | OPC UA values as JSON            |

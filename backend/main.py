@@ -314,8 +314,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Direct RFID inventory disabled or missing IP in config.")
 
-    # Initialize format data manager
-    cache_dir = Path(__file__).parent.parent
+    # Initialize format data manager (store cache under /data)
+    cache_dir = Path(__file__).parent.parent / "data"
+    cache_dir.mkdir(exist_ok=True)
     html_cache_path = cache_dir / "customer-html-cache.html"
     format_manager = FormatDataManager(str(html_cache_path))
     
@@ -425,8 +426,9 @@ async def _cors_debug_logger(request, call_next):  # noqa: D401
     return await call_next(request)
 # -------------------------------------------------------------------------------
 
-# Path to store HTML cache (same as your Next.js app)
-CACHE_DIR = Path(__file__).parent.parent
+# Path to store HTML cache under shared /data (also mapped as a volume)
+CACHE_DIR = Path(__file__).parent.parent / "data"
+CACHE_DIR.mkdir(exist_ok=True)
 HTML_CACHE_PATH = CACHE_DIR / "customer-html-cache.html"
 
 # Pydantic models for request/response
@@ -623,49 +625,7 @@ async def upload_customer_html(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error uploading HTML file: {e}")
         raise HTTPException(status_code=500, detail="Error processing uploaded file")
-
-@app.post("/api/rfid/scan")
-async def process_rfid_scan(data: RFIDData):
-    """Process RFID tag scan"""
-    logger.info(f"Processing RFID scan: {data.tag_id}")
     
-    # Here you can add your RFID processing logic
-    # For example: validate tag, look up in database, update inventory, etc.
-    
-    return {
-        "success": True,
-        "message": f"RFID tag {data.tag_id} processed successfully",
-        "data": {
-            "tag_id": data.tag_id,
-            "customer": data.customer_name,
-            "part": data.part_number,
-            "description": data.description,
-            "timestamp": "2025-06-26T12:00:00Z"  # You can use datetime.now()
-        }
-    }
-
-'''
-@app.get("/api/rfid/tags")
-async def get_rfid_tags():
-    """Get list of all RFID tags"""
-    # This is a mock response - you would typically fetch from a database
-    return [
-        {
-            "tag_id": "RFID001",
-            "customer_name": "Customer A",
-            "part_number": "PART-001",
-            "description": "Sample part 1",
-            "last_scanned": "2025-06-26T10:00:00Z"
-        },
-        {
-            "tag_id": "RFID002", 
-            "customer_name": "Customer B",
-            "part_number": "PART-002",
-            "description": "Sample part 2",
-            "last_scanned": "2025-06-26T11:00:00Z"
-        }
-    ]
-'''
 
 # Format Data Endpoints (using FormatDataManager)
 @app.get("/api/format-data")
@@ -885,61 +845,6 @@ async def rfid_inventory_status():
         }
     }
 
-@app.post("/api/opc-ua/refresh")
-async def refresh_opc_ua_value():
-    """Force refresh of OPC UA node value"""
-    if not opc_manager:
-        raise HTTPException(status_code=400, detail="OPC UA is disabled")
-    
-    status = await opc_manager.get_status()
-    
-    if not status["available"]:
-        raise HTTPException(status_code=500, detail="OPC UA library not available")
-    
-    if status["connection_status"] != "connected":
-        raise HTTPException(status_code=503, detail="OPC UA not connected")
-    
-    try:
-        value_data = await opc_manager.refresh_value()
-        if value_data:
-            return {
-                "success": True,
-                "message": "Value refreshed successfully",
-                "data": value_data
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to read node value")
-    except Exception as e:
-        logger.error(f"Error refreshing OPC UA value: {e}")
-        raise HTTPException(status_code=500, detail=f"Error refreshing value: {str(e)}")
-
-@app.post("/api/opc-ua/reconnect")
-async def reconnect_opc_ua():
-    """Force reconnection to OPC UA server"""
-    if not opc_manager:
-        raise HTTPException(status_code=400, detail="OPC UA is disabled")
-    
-    status = await opc_manager.get_status()
-    
-    if not status["available"]:
-        raise HTTPException(status_code=500, detail="OPC UA library not available")
-    
-    try:
-        success = await opc_manager.reconnect()
-        
-        if success:
-            return {
-                "success": True,
-                "message": "Successfully reconnected to OPC UA server",
-                "status": "connected"
-            }
-        else:
-            new_status = await opc_manager.get_status()
-            raise HTTPException(status_code=503, detail=f"Failed to reconnect: {new_status['connection_status']}")
-            
-    except Exception as e:
-        logger.error(f"Error reconnecting to OPC UA: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reconnecting: {str(e)}")
 
 # WebSocket endpoint for OPC UA updates
 @app.websocket("/ws/opc-ua")
@@ -983,22 +888,6 @@ async def websocket_opc_ua_updates(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         websocket_manager.disconnect(websocket)
 
-# Example: Trigger OPC UA value change broadcast (for testing)
-@app.post("/api/test/broadcast-value-change")
-async def test_broadcast_value_change():
-    """Test endpoint to trigger a broadcast of OPC UA value change"""
-    test_data = {
-        "tag_id": "RFID001",
-        "customer_name": "Customer A",
-        "part_number": "PART-001",
-        "description": "Sample part 1",
-        "timestamp": "2025-06-26T12:00:00Z"
-    }
-    
-    # Broadcast to all WebSocket clients
-    await websocket_manager.broadcast_value_change(test_data)
-    
-    return {"success": True, "message": "Broadcast triggered", "data": test_data}
 
 # Format Part Assignment API Endpoints
 @app.get("/api/format-assignments")

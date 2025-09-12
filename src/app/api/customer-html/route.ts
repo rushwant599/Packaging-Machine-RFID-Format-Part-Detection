@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 
-const DATA_PATH = path.join(process.cwd(), "customer-html-cache.html");
+// Store cache file under /data/customer-html-cache.html
+const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_PATH = path.join(DATA_DIR, "customer-html-cache.html");
 
 export async function GET() {
   try {
@@ -24,6 +26,8 @@ export async function POST(req: NextRequest) {
   }
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
+  // Ensure target directory exists
+  await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(DATA_PATH, buffer);
   // Direkt nach dem Speichern zurückgeben
   return new NextResponse(buffer, {

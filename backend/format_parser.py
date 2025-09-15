@@ -51,7 +51,7 @@ class FormatDataParser:
             # Build complete format data structure
             format_data = {
                 'formats': formats_data,
-                'formatParts': collected['combinedParts'],  # default: combined (valueIndex + part)
+                'formatParts': collected['combinedParts'],
                 'formatPartsRaw': collected['rawParts'],
                 'formatPartsPerFormat': collected['rawPerFormat'],
                 'formatPartsPerFormatWithIndex': collected['combinedPerFormat'],
@@ -144,14 +144,14 @@ class FormatDataParser:
         """
         mapping: Dict[int, str] = {}
         # Each row may contain a td with id vN and a first td with class 'value index'
-        for value_cell in soup.select('td[id^="v"], td[id^="v"]'):  # redundancy harmless
+        for value_cell in soup.select('td[id^="v"], td[id^="v"]'):
             vid = value_cell.get('id')
             if not vid:
                 continue
             m = re.match(r'^v(\d+)$', vid)
             if not m:
                 continue
-            data_pos = int(m.group(1))  # corresponds to index in formats_data['data'] (1-based, after header)
+            data_pos = int(m.group(1))
             row = value_cell.parent
             if not row:
                 continue

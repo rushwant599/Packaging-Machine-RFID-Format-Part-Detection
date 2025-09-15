@@ -274,6 +274,7 @@ export default function SomicPage() {
                       </label>
                     </div>
                     <hr className="my-2" />
+                    {/*}
                     <div className="flex items-center">
                       <input
                         type="checkbox"
@@ -286,6 +287,7 @@ export default function SomicPage() {
                         Enable Direct RFID Inventory
                       </label>
                     </div>
+                    */}
                     <div className="mt-4">
                       <button
                         type="button"
@@ -338,6 +340,7 @@ export default function SomicPage() {
                         </div>
                       )}
                     </div>
+                    {/*
                     <div className="mt-4">
                       <button
                         type="button"
@@ -375,6 +378,7 @@ export default function SomicPage() {
                         </div>
                       )}
                     </div>
+                    */}
                     <div>
                       <button
                         type="submit"

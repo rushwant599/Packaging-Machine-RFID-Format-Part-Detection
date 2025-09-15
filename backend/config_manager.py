@@ -4,20 +4,19 @@ from typing import Dict, Any
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "data/config.json")
 
+#Default configuration
 DEFAULT_CONFIG = {
-    "OPC_UA_SERVER_URL": "opc.tcp://192.168.18.8:4840",
+    #PLC OPC UA
+    "OPC_UA_SERVER_URL": "opc.tcp://IP-Address-PLC:4840",
     "OPC_UA_NODE_ID": "ns=2;s=.G_HMI.stCM.sFormatAktiv",
-    "OPC_UA_ENABLED": True,
-    # Event Listener (neu)
+    "OPC_UA_ENABLED": False,
+    # Event Listener 
     "OPC_UA_EVENT_ENABLED": False,
-    "OPC_UA_EVENT_SERVER_URL": "opc.tcp://192.168.18.8:4840",
+    "OPC_UA_EVENT_SERVER_URL": "opc.tcp://IP-Address-RFID:4840",
     "OPC_UA_EVENT_TYPE": "ns=4;i=6050",
     "OPC_UA_EVENT_INTERVAL_MS": 500,
     "OPC_UA_EVENT_MAX_EVENTS": 500,
-    "RFID_OPC_ENABLED": False,
-    "RFID_OPC_SERVER_URL": "opc.tcp://10.11.36.216:4840",
-    "RFID_OPC_NODE_ID": "ns=4;i=6023",
-    # New: Direct RFID Inventory (socket) config
+    # Direct RFID Inventory via TCP/IP (CoLa)
     "RFID_INVENTORY_ENABLED": False,
     "RFID_READER_IP": "",
     "RFID_READER_PORT": 2111,
@@ -27,7 +26,7 @@ DEFAULT_CONFIG = {
 }
 
 def load_config() -> Dict[str, Any]:
-    # 1. Starte mit ENV, falls gesetzt
+    # 1. Load from environment variables
     config = {}
     env_map = {
         "OPC_UA_SERVER_URL": os.environ.get("OPC_UA_SERVER_URL"),
@@ -38,10 +37,6 @@ def load_config() -> Dict[str, Any]:
         "OPC_UA_EVENT_TYPE": os.environ.get("OPC_UA_EVENT_TYPE"),
         "OPC_UA_EVENT_INTERVAL_MS": os.environ.get("OPC_UA_EVENT_INTERVAL_MS"),
         "OPC_UA_EVENT_MAX_EVENTS": os.environ.get("OPC_UA_EVENT_MAX_EVENTS"),
-        "RFID_OPC_ENABLED": os.environ.get("RFID_OPC_ENABLED"),
-        "RFID_OPC_SERVER_URL": os.environ.get("RFID_OPC_SERVER_URL"),
-        "RFID_OPC_NODE_ID": os.environ.get("RFID_OPC_NODE_ID"),
-        # Direct RFID inventory env overrides
         "RFID_INVENTORY_ENABLED": os.environ.get("RFID_INVENTORY_ENABLED"),
         "RFID_READER_IP": os.environ.get("RFID_READER_IP"),
         "RFID_READER_PORT": os.environ.get("RFID_READER_PORT"),
@@ -51,16 +46,15 @@ def load_config() -> Dict[str, Any]:
     }
     for key, value in env_map.items():
         if value is not None:
-            # Für boolsche Werte
             if key.endswith("ENABLED"):
                 config[key] = value.lower() == "true"
             else:
                 config[key] = value
-    # 2. Überschreibe mit gespeicherter Config, falls vorhanden
+    # 2. Load from config file
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config.update(json.load(f))
-    # 3. Fülle fehlende Werte mit Defaults
+    # 3. Fill missing values with defaults
     for key, value in DEFAULT_CONFIG.items():
         if key not in config:
             config[key] = value

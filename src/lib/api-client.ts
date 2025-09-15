@@ -23,8 +23,6 @@ declare global {
 }
 if (typeof window !== 'undefined' && !window.__BACKEND_URL_LOGGED__) {
   window.__BACKEND_URL_LOGGED__ = true;
-  // bewusstes Logging für einmalige Debug-Info
-  // eslint-disable-next-line no-console
   console.log('[api-client] BACKEND_URL =', BACKEND_URL);
 }
 

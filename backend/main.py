@@ -47,6 +47,50 @@ logger.info(f"  - ../.env.docker: {Path('../.env.docker').exists()}")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def log_startup_banner():
+    banner = r"""
+   _____  ______ _____ _____   
+  |  __ \|  ____|_   _|  __ \ 
+  | |__) | |__    | | | |  | | 
+  |  _  /|  __|   | | | |  | |    
+  | | \ \| |     _| |_| |__| |    
+  |_|  \_\_|    |_____|_____/   
+  Somic RFID
+
+                      ..                                      
+                    --..            .:.                     
+                    -*+.           .*=:                     
+                    -#@+           +@=..                    
+                    --%@*.       .-%@:                      
+                    ::-#@%-.    .=+#+#:                     
+                    .-.-*===:  .-+*#@#%-.                   
+                     =.:*=:-==-=-=+=#%*#-.                  
+                    .+++++=+:++-=---*@@+=-.                 
+                  .-=+---:-=....:---%@+:=-:                 
+                 :--==::-:=:=....:.+@@-=-:-.                
+               .:+==-.:+.+--:..::...-*-:::=:.               
+              .-#+=-..#=-*=:.:..:....=-===#+.               
+              .++:...=::+=-......:...::::+%#=..             
+             ..+*-:.:-:%##=-:-=-:.:.:...-*+=#=..            
+             .:++=...-#=-=--:..-+=..-.:.=#*=-*+.            
+             .+--....=+-:.:..::...=-.::.-#=-+++=.           
+             -:.:::-..:..+-.-:.=:..-:..::-+=-...*:.         
+           .+#--===:.:=+:.:.... .-..=.+.:=+..::.-*-.        
+          .:***%*=-::=:=---==-=:-:.:.-+::--.::=*=+*=.       
+          ..-+++--=-:--###++**+=-+.=:.=:++::..::::.:..      
+           ..:=+*++=+***-----:--:+...:++*-.:..:..:-=..      
+             ..:+:::::::=+=:.....=--*+#+:.:-:...=+:..       
+               .:=====-+-+=++---=*%*+::::..:. ...-#.        
+                 ......#:..:##*+==+=...-=.:.:.:.....        
+                       .+=..-=-:..:-:.:=-*-.....:...        
+                        :*+.:.........: ...:.:......        
+                         .=:..:--:-..+:.:::.:..:            
+                         ..=...-:.#.-*......::..            
+                          ..    ......     
+    """
+    logger.info("\n" + banner)
+
 # Get configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
@@ -148,6 +192,7 @@ async def lifespan(app: FastAPI):
     global opc_manager, rfid_opc_manager, format_manager, assignment_manager, async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, opc_event_listener
     
     # Startup
+    log_startup_banner()
     logger.info("Starting RFID Parts Backend...")
     
     # Initialize Simple Assignment Database
@@ -1539,6 +1584,7 @@ if __name__ == "__main__":
     port = int(os.getenv("BACKEND_PORT", "8001"))
     debug = os.getenv("DEBUG", "false").lower() == "true"
 
+    log_startup_banner()
     logger.info(f"Starting RFID Backend on {host}:{port}")
     uvicorn.run(
         "main:app",

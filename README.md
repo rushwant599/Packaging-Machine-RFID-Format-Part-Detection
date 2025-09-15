@@ -8,14 +8,14 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 
 ## Project Overview
 
-- **Frontend:** Next.js 15 (React 19, TypeScript)
-- **Backend:** Python 3.13, FastAPI, SQLite (persistent assignments)
+- **Frontend:** Next.js
+- **Backend:** Python, FastAPI, SQLite (persistent assignments)
+- **Networking:** Nginx
 - **Container:** Multi-stage Docker build, runs as a single container
 - **CI/CD:** GitHub Actions (Build, Test, Security, Release)
 - **Features:**
   - Assign RFID tags to format parts (persisted)
   - Visual validation & status display
-  - Multilingual (EN, DE, CZ, ES, FR, IT)
   - Somic branding
   - OPC UA & WebSocket integration
 
@@ -82,10 +82,9 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 ## Developer Guide
 
 - **Frontend:**
-  - Entry point: `src/app/page.tsx`, `public/somic.html`, `public/features.js`
+  - Entry point: `src/app/somic/page.tsx`, `public/somic.html`, `public/features.js`, `src/app/customer/page.tsx`
   - API calls: `src/lib/api-client.ts` (uses `NEXT_PUBLIC_BACKEND_URL`)
   - UI components: `src/components/`, styling in `public/somic.css` and `src/app/globals.css`
-  - Multilingual: translations in `public/translations.js`
 
 - **Backend:**
   - Entry point: `backend/main.py` (FastAPI)
@@ -100,7 +99,6 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 
 - **Testing:**
   - Frontend: `npm run lint`, build check
-  - Backend: `pytest backend/test_main.py`
 
 - **CI/CD:**
   - See `.github/workflows/` for build, deploy, and security workflows
@@ -108,23 +106,7 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 ---
 
 ## API Endpoints (Backend)
-
-| Endpoint                              | Method | Description                         | Response (Schema)                |
-|----------------------------------------|--------|-------------------------------------|----------------------------------|
-| `/api/assignments`                     | GET    | Get all assignments                 | `[ { formatpart, tagid } ]`      |
-| `/api/assignments`                     | POST   | Create new assignment               | `{ success: true }`              |
-| `/api/assignments/formatpart/{part}`   | GET    | Get assignment for format part      | `{ formatpart, tagid }`          |
-| `/api/assignments/formatpart/{part}`   | DELETE | Delete assignment for format part   | `{ success: true }`              |
-| `/api/format-parts`                    | GET    | List all format parts               | `[ ... ]`                        |
-| `/api/formats`                         | GET    | List all formats                    | `[ ... ]`                        |
-| `/api/format-parts-per-format`         | GET    | Format parts grouped by format      | `{ format: [parts] }`            |
-| `/api/rfid-opc-ua/status`              | GET    | RFID status                         | `...`                            |
-| `/api/rfid-opc-ua/value`               | GET    | RFID last value                     | `...`                            |
-| `/api/verify-password`                 | POST   | Password verification (admin)       | `{ valid: true/false }`          |
-| `/api/health`                          | GET    | Health check                        | `{ status: 'ok' }`               |
-| `/ws/opc-ua`                           | WS     | OPC UA WebSocket stream             | OPC UA values as JSON            |
-
----
+[API-Endpoints](/Format-RFIDParts/backend/API.md)
 
 ## Frontend Pages & Views
 
@@ -146,19 +128,6 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 - **The frontend API client always uses the URL from `NEXT_PUBLIC_BACKEND_URL`.**
 - **OPC UA and WebSocket are optional and can be disabled via `.env`.**
 - **Questions?** → See code comments and the `README.md` in the backend folder.
-- **Path to picture folder** → Set correct path in `backend/main.py` - list_pictures()
-
----
-
-## Example API Response
-
-```json
-// GET /api/assignments
-[
-  { "formatpart": "1234-AB", "tagid": "RFID-0001" },
-  { "formatpart": "5678-CD", "tagid": "RFID-0002" }
-]
-```
 
 ---
 

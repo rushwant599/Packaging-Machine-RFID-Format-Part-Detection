@@ -435,7 +435,7 @@ export default function CustomerPage() {
     fetchOnce();
     return () => { cancelled = true; };
   }, [selectedFormat]);
-  // WebSocket für Live-Event-IDs + Assignments Updates
+  // WebSocket für Live-Event-IDs (aus /api/live-event-ids) + Assignments Updates
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closed = false;
@@ -460,15 +460,13 @@ export default function CustomerPage() {
             const raw = JSON.parse(ev.data) as unknown;
             if (typeof raw !== 'object' || raw === null) return;
             const msg = raw as Record<string, unknown>;
+            // Quelle für Live-Anzeige ist ausschließlich der WS-Stream "live_event_ids",
+            // der semantisch den HTTP-Endpoint /api/live-event-ids widerspiegelt.
             if (msg.type === 'live_event_ids' && Array.isArray(msg.ids)) {
               const norm = (msg.ids as unknown[]).map(t => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
               setLiveEventTagIds(new Set(norm));
             } else if (msg.type === 'assignments_update' && msg.assignments) {
               setAssignments(msg.assignments as AssignmentsMap);
-            } else if (msg.type === 'rfid_inventory' && Array.isArray(msg.tags)) {
-              // Fallback falls Backend (ältere Version) noch rfid_inventory sendet
-              const norm = (msg.tags as unknown[]).map(t => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
-              setLiveEventTagIds(new Set(norm));
             }
           } catch {}
         };

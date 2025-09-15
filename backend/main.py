@@ -827,8 +827,6 @@ async def list_current_rfid_tag_ids_alias():
         "source": "db"
     }
 
-## Entferntes Alias: /api/live-event-ids wird weiter unten (Event-Bytes basierend) definiert.
-
 # Einfacher Status-Endpunkt für das direkte Inventory (Debug-Hilfe)
 @app.get("/api/rfid-inventory/status")
 async def rfid_inventory_status():
@@ -1504,7 +1502,7 @@ def extract_hex_ids_from_payload(payload: str):
     return ordered
 
 @app.get("/api/live-event-ids")
-async def get_live_event_ids(window_sec: float = 8.0):
+async def get_live_event_ids(window_sec: float = 5.0):
     """Liefert einzigartige Hex IDs aus den jüngsten Event-Bytes innerhalb eines Zeitfensters.
 
     window_sec: Konfigurierbares Zeitfenster (Standard 8s). Werte <0 werden auf Default gesetzt.

@@ -423,6 +423,14 @@ export default function CustomerPage() {
   // --- RFID Assignments + Live Sichtbarkeit ---
   const [assignments, setAssignments] = React.useState<AssignmentsMap>({}); // format_part -> { rfid_tag_id }
   const [liveEventTagIds, setLiveEventTagIds] = React.useState<Set<string>>(new Set());
+  // Einheitliche Normalisierung für Tag-IDs (robust gegen Bindestriche/Leerzeichen etc.)
+  const normalizeTagId = useCallback((t: unknown) => {
+    return (t ?? '')
+      .toString()
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+  }, []);
   // Assignments nur beim (erstmaligen) Laden und wenn Format gewechselt wird holen (statt Dauer-Polling)
   useEffect(() => {
     let cancelled = false;
@@ -463,7 +471,10 @@ export default function CustomerPage() {
             // Quelle für Live-Anzeige ist ausschließlich der WS-Stream "live_event_ids",
             // der semantisch den HTTP-Endpoint /api/live-event-ids widerspiegelt.
             if (msg.type === 'live_event_ids' && Array.isArray(msg.ids)) {
-              const norm = (msg.ids as unknown[]).map(t => (t ?? '').toString().trim().toUpperCase()).filter((t: string) => t.length > 0);
+              const norm = (msg.ids as unknown[])
+                .map(t => normalizeTagId(t))
+                .filter((t: string) => t.length > 0);
+              // Immer neue Set-Instanz erzeugen, damit React Referenzänderung erkennt
               setLiveEventTagIds(new Set(norm));
             } else if (msg.type === 'assignments_update' && msg.assignments) {
               setAssignments(msg.assignments as AssignmentsMap);
@@ -475,7 +486,7 @@ export default function CustomerPage() {
     };
     connect();
     return () => { closed = true; if (ws) ws.close(); };
-  }, []);
+  }, [normalizeTagId]);
 
   // Hilfsfunktion: aus Datenzeile (Nr. + FTL.) einen FormatPart-Key ableiten wie in Assignments (combinedPerFormat nutzt "<valueIndex> <part>")
   const deriveFormatPartKey = (row: Step): string | null => {
@@ -508,7 +519,7 @@ export default function CustomerPage() {
         ? assignment
         : (assignment?.rfid_tag_id ?? (assignment as AssignmentsMapEntry | undefined)?.rfidTagId);
       const tagId = rawTagId ? rawTagId.toString().trim() : null;
-      const normTag = tagId ? tagId.toUpperCase() : null;
+      const normTag = tagId ? normalizeTagId(tagId) : null;
       const seen = normTag ? liveEventTagIds.has(normTag) : false;
   let symbol: string;
   if (!tagId) symbol = '–';
@@ -516,7 +527,7 @@ export default function CustomerPage() {
   else symbol = '✖';
   return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
     });
-  }, [enrichedSteps, assignments, liveEventTagIds]);
+  }, [enrichedSteps, assignments, liveEventTagIds, normalizeTagId]);
 
   // --- Upload & Kamera Helpers/Handlers (after dependencies) ---
   const sanitizePart = useCallback((s: string) => s.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100), []);
@@ -668,13 +679,13 @@ export default function CustomerPage() {
         ? assignment
         : (assignment?.rfid_tag_id ?? (assignment as AssignmentsMapEntry | undefined)?.rfidTagId);
       const tagId = rawTagId ? rawTagId.toString().trim() : null;
-      const normTag = tagId ? tagId.toUpperCase() : null;
+      const normTag = tagId ? normalizeTagId(tagId) : null;
       const seen = normTag ? liveEventTagIds.has(normTag) : false;
       let symbol: string;
       if (!tagId) symbol = '–'; else if (seen) symbol = '✔'; else symbol = '✖';
       return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
     });
-  }, [diffMode, toFormat, fromFormat, stepsWithStatus, injectFormat, steps, assignments, liveEventTagIds]);
+  }, [diffMode, toFormat, fromFormat, stepsWithStatus, injectFormat, steps, assignments, liveEventTagIds, normalizeTagId]);
 
   const current = stepsWithStatus[currentStep];
   const totalSteps = stepsWithStatus.length;
@@ -745,22 +756,33 @@ export default function CustomerPage() {
     const rowsWithTag = basis.filter(r => r._rfidStatus?.tagId);
     const assignedTotal = rowsWithTag.length;
     const recognizedAssigned = rowsWithTag.filter(r => r._rfidStatus?.seen).length;
-    const assignedNormSet = new Set(rowsWithTag.map(r => r._rfidStatus?.tagIdNorm).filter(Boolean));
+    const assignedNormSet = new Set(
+      rowsWithTag
+        .map(r => normalizeTagId(r._rfidStatus?.tagId))
+        .filter(Boolean) as string[]
+    );
     let foreignCount = 0;
     liveEventTagIds.forEach(t => { if (!assignedNormSet.has(t)) foreignCount++; });
     return { assignedTotal, recognizedAssigned, foreignCount };
-  }, [statsStepsWithStatus, liveEventTagIds]);
+  }, [statsStepsWithStatus, liveEventTagIds, normalizeTagId]);
 
   const hasPrev = currentStep > 0;
   const hasNext = currentStep < totalSteps - 1;
   const goto = useCallback((delta: number) => {
     setCurrentStep(s => {
+      const length = totalSteps;
       const next = s + delta;
       if (next < 0) return 0;
-      if (next >= steps.length) return steps.length - 1;
+      if (next >= length) return Math.max(0, length - 1);
       return next;
     });
-  }, [steps.length]);
+  }, [totalSteps]);
+  // Falls sich die sichtbare Länge ändert (z.B. Wechsel-Modus), Index einklappen
+  useEffect(() => {
+    if (currentStep >= totalSteps) {
+      setCurrentStep(Math.max(0, totalSteps - 1));
+    }
+  }, [totalSteps, currentStep]);
   return (
     <div className="flex flex-col bg-white dark:bg-black" style={{ height: '100dvh', overflow:'hidden' }}>
       <Header profile="Customer" />

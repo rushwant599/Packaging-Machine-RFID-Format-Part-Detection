@@ -106,7 +106,7 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 ---
 
 ## API Endpoints (Backend)
-[API-Endpoints](/Format-RFIDParts/backend/API.md)
+[API-Endpoints](/backend/API.md)
 
 ## Frontend Pages & Views
 

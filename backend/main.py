@@ -50,14 +50,17 @@ logger = logging.getLogger(__name__)
 
 def log_startup_banner():
     banner = r"""
-   _____  ______ _____ _____   
-  |  __ \|  ____|_   _|  __ \ 
-  | |__) | |__    | | | |  | | 
-  |  _  /|  __|   | | | |  | |    
-  | | \ \| |     _| |_| |__| |    
-  |_|  \_\_|    |_____|_____/   
-  Somic RFID
-
+  █████████     ███████    ██████   ██████ █████   █████████     █████                                        
+ ███░░░░░███  ███░░░░░███ ░░██████ ██████ ░░███   ███░░░░░███   ░░███                                         
+░███    ░░░  ███     ░░███ ░███░█████░███  ░███  ███     ░░░     ░███        █████ ████ ████████   █████ █████
+░░█████████ ░███      ░███ ░███░░███ ░███  ░███ ░███             ░███       ░░███ ░███ ░░███░░███ ░░███ ░░███ 
+ ░░░░░░░░███░███      ░███ ░███ ░░░  ░███  ░███ ░███             ░███        ░███ ░███  ░███ ░███  ░░░█████░  
+ ███    ░███░░███     ███  ░███      ░███  ░███ ░░███     ███    ░███      █ ░███ ░███  ░███ ░███   ███░░░███ 
+░░█████████  ░░░███████░   █████     █████ █████ ░░█████████     ███████████ ░░███████  ████ █████ █████ █████
+ ░░░░░░░░░     ░░░░░░░    ░░░░░     ░░░░░ ░░░░░   ░░░░░░░░░     ░░░░░░░░░░░   ░░░░░███ ░░░░ ░░░░░ ░░░░░ ░░░░░ 
+                                                                              ███ ░███                        
+                                                                             ░░██████                         
+                                                                              ░░░░░░                          
                       ..                                      
                     --..            .:.                     
                     -*+.           .*=:                     
@@ -124,6 +127,7 @@ _current_rfid_epcs: list[str] = []   # nur EPC Strings
 _last_rfid_timestamp: float | None = None
 _current_rfid_seen: dict[str, dict] = {}  # per EPC: aggregation with first_seen, last_seen, read_count, last_rssi, last_power, antenna
 _rfid_retention_sec: float = 10.0
+_live_event_broadcast_task = None
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -272,6 +276,35 @@ async def lifespan(app: FastAPI):
         await opc_event_listener.start()
         logger.info("OPC UA Event Listener gestartet (%s / %s)", evt_url, evt_type)
 
+    # Periodically broadcast current live_event_ids snapshot so clients update without manual refresh
+    import asyncio as _a
+    async def _periodic_live_ids_broadcast():
+        last_ids: list[str] | None = None
+        while True:
+            try:
+                await _a.sleep(1.0)
+                now_ts = time.time()
+                # Prune default 8s window
+                cutoff = now_ts - 8.0
+                to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
+                for k in to_delete:
+                    _live_event_hex_ids.pop(k, None)
+                ids = list(_live_event_hex_ids.keys())
+                ids.sort(key=lambda x: _live_event_hex_ids[x]["last_seen"], reverse=True)
+                # Broadcast if changed (or on first run)
+                if last_ids is None or ids != last_ids:
+                    last_ids = ids.copy()
+                    await websocket_manager.broadcast_json({
+                        "type": "live_event_ids",
+                        "ids": ids,
+                        "count": len(ids),
+                        "timestamp": now_ts
+                    })
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Periodic live_event_ids broadcast error: %s", e)
+
+    globals()["_live_event_broadcast_task"] = _a.create_task(_periodic_live_ids_broadcast())
+
     # Direct RFID Inventory (Socket) falls aktiviert
     if config.get("RFID_INVENTORY_ENABLED", False) and config.get("RFID_READER_IP"):
         reader_ip = config.get("RFID_READER_IP")
@@ -374,6 +407,12 @@ async def lifespan(app: FastAPI):
         _rfid_poll_task.cancel()
         try:
             await _rfid_poll_task
+        except Exception:  # noqa: BLE001
+            pass
+    if _live_event_broadcast_task:
+        _live_event_broadcast_task.cancel()
+        try:
+            await _live_event_broadcast_task
         except Exception:  # noqa: BLE001
             pass
     if assignment_manager:

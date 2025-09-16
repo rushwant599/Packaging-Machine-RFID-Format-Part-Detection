@@ -447,20 +447,25 @@ export default function CustomerPage() {
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closed = false;
+    // Resolve a base HTTP URL once for both WS and initial snapshot
+    let resolvedBaseHttp = '';
+    try {
+      let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+      if (!tmp) {
+        const { protocol, hostname, port } = window.location;
+        const isStandardPort = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
+        if (protocol === 'https:' || isStandardPort) {
+          tmp = `${protocol}//${hostname}`;
+        } else {
+          const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
+          tmp = `${protocol}//${hostname}:${p}`;
+        }
+      }
+      resolvedBaseHttp = tmp;
+    } catch {}
     const connect = () => {
       try {
-        let baseHttp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
-        if (!baseHttp) {
-          const { protocol, hostname, port } = window.location;
-          const isStandardPort = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
-          if (protocol === 'https:' || isStandardPort) {
-            baseHttp = `${protocol}//${hostname}`;
-          } else {
-            const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-            baseHttp = `${protocol}//${hostname}:${p}`;
-          }
-        }
-        const base = baseHttp.replace(/^http/, 'ws');
+        const base = resolvedBaseHttp.replace(/^http/, 'ws');
         const url = `${base}/ws/opc-ua`;
         ws = new WebSocket(url);
         ws.onmessage = (ev: MessageEvent) => {
@@ -485,6 +490,17 @@ export default function CustomerPage() {
       } catch {}
     };
     connect();
+    // Initial HTTP snapshot so UI shows immediately without manual refresh
+    (async () => {
+      try {
+        const httpBase = resolvedBaseHttp || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '');
+        const snap = await fetch(`${httpBase.replace(/\/$/, '')}/api/live-event-ids`).then(r => r.ok ? r.json() : null);
+        if (snap && Array.isArray(snap.ids)) {
+          const norm = (snap.ids as unknown[]).map(t => normalizeTagId(t)).filter((t: string) => t.length > 0);
+          setLiveEventTagIds(new Set(norm));
+        }
+      } catch {}
+    })();
     return () => { closed = true; if (ws) ws.close(); };
   }, [normalizeTagId]);
 

@@ -84,7 +84,7 @@ def log_startup_banner():
                          ..=...-:.#.-*......::..            
                           ..    ......     
     """
-    logger.info("\n" + banner)
+    logger.warning("\n" + banner)
 
 # Get configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")

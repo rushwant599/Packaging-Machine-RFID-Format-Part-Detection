@@ -416,6 +416,8 @@ function showNext() {
 // Picture Upload (File or Camera)
 let uploadPartId = null;
 let mediaStream = null;
+let videoInputDevices = []; // list of video input deviceIds
+let currentVideoDeviceIndex = -1;
 
 function openUpload(partId) {
   uploadPartId = partId;
@@ -445,6 +447,8 @@ function ensureUploadModal() {
       <input id="file-input" type="file" accept="image/*" style="display:none" />
       <button onclick="triggerFile()">Datei wählen</button>
       <button id="camera-btn" onclick="toggleCamera()">Kamera</button>
+      <button id="flip-btn" onclick="flipCamera()" style="display:none">Flip</button>
+      <select id="camera-select" style="display:none; margin-left:8px"></select>
       <button onclick="closeUpload()">Schließen</button>
     </div>
     <div class="camera-area">
@@ -460,6 +464,13 @@ function ensureUploadModal() {
   document.body.appendChild(modal);
   // File change handler
   modal.querySelector('#file-input').addEventListener('change', handleFileSelected);
+  // camera select change handler
+  modal.querySelector('#camera-select').addEventListener('change', (e) => {
+    const idx = parseInt(e.target.value, 10);
+    if (!Number.isNaN(idx) && idx >= 0) {
+      startCameraForDevice(idx);
+    }
+  });
   return modal;
 }
 
@@ -507,13 +518,126 @@ async function toggleCamera() {
     return;
   }
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    // Permission-first: request a minimal getUserMedia to prompt permission if needed,
+    // then enumerate devices and populate the select. This avoids empty labels/deviceIds.
+    await populateCameraSelect();
+
+    // Start camera for current index (if set) or default to first device
+    const startIndex = (currentVideoDeviceIndex >= 0) ? currentVideoDeviceIndex : (videoInputDevices.length > 0 ? 0 : -1);
+    if (startIndex >= 0) {
+      await startCameraForDevice(startIndex);
+    } else {
+      // fallback to generic getUserMedia
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = mediaStream;
+      video.style.display = 'block';
+      document.getElementById('camera-controls').style.display = 'flex';
+      document.getElementById('camera-btn').textContent = 'Kamera läuft';
+      const flipBtn = document.getElementById('flip-btn');
+      if (flipBtn) flipBtn.style.display = 'none';
+    }
+  } catch (e) {
+    if (status) status.textContent = 'Kamera Fehler: ' + e;
+  }
+}
+
+// Start camera explicitly for a device index
+async function startCameraForDevice(index) {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') return;
+  if (!videoInputDevices || videoInputDevices.length === 0) return;
+  const video = document.getElementById('camera');
+  const status = document.getElementById('upload-status');
+  try {
+    const device = videoInputDevices[index];
+    const constraints = { video: { deviceId: { exact: device.deviceId } }, audio: false };
+    // Stop any existing stream
+    if (mediaStream) stopCamera();
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    currentVideoDeviceIndex = index;
     video.srcObject = mediaStream;
     video.style.display = 'block';
     document.getElementById('camera-controls').style.display = 'flex';
     document.getElementById('camera-btn').textContent = 'Kamera läuft';
+    const flipBtn = document.getElementById('flip-btn');
+    if (flipBtn) flipBtn.style.display = (videoInputDevices && videoInputDevices.length > 1) ? 'inline-block' : 'none';
+    if (status) status.textContent = '';
+    // Update camera-select to reflect selection
+    const sel = document.getElementById('camera-select');
+    if (sel) {
+      sel.value = String(currentVideoDeviceIndex);
+      sel.style.display = (videoInputDevices && videoInputDevices.length > 1) ? 'inline-block' : 'none';
+    }
   } catch (e) {
     if (status) status.textContent = 'Kamera Fehler: ' + e;
+  }
+}
+
+// Flip between available video input devices
+async function flipCamera() {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    videoInputDevices = devices.filter(d => d.kind === 'videoinput');
+    if (!videoInputDevices || videoInputDevices.length <= 1) return;
+    // Move to next index
+    const next = (currentVideoDeviceIndex + 1) % videoInputDevices.length;
+    await startCameraForDevice(next);
+  } catch (e) {
+    console.warn('Error flipping camera', e);
+  }
+}
+
+// Permission-first device enumeration and populate select
+async function populateCameraSelect() {
+  // If enumerateDevices is missing, nothing we can do
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
+  try {
+    // If labels/deviceIds are not available yet, ask for permission with minimal constraints
+    let needPermission = false;
+    try {
+      const devicesCheck = await navigator.mediaDevices.enumerateDevices();
+      // If device labels are empty (''), we probably need permission
+      needPermission = devicesCheck.every(d => d.kind !== 'videoinput' || !d.label);
+    } catch (e) {
+      needPermission = true;
+    }
+
+    if (needPermission && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      // request a tiny stream to trigger permission prompt but stop immediately
+      let tmpStream = null;
+      try {
+        tmpStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (e) {
+        // permission denied or other error; continue and try to enumerate (likely will have no labels)
+      } finally {
+        if (tmpStream) {
+          tmpStream.getTracks().forEach(t => t.stop());
+        }
+      }
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    videoInputDevices = devices.filter(d => d.kind === 'videoinput');
+    // Build select options
+    const sel = document.getElementById('camera-select');
+    if (sel) {
+      sel.innerHTML = '';
+      videoInputDevices.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = d.label || `Camera ${i+1}`;
+        sel.appendChild(opt);
+      });
+      // default index
+      currentVideoDeviceIndex = videoInputDevices.length > 0 ? 0 : -1;
+      sel.value = currentVideoDeviceIndex >= 0 ? String(currentVideoDeviceIndex) : '';
+      sel.style.display = (videoInputDevices.length > 1) ? 'inline-block' : 'none';
+    }
+    // Show flip button if multiple
+    const flipBtn = document.getElementById('flip-btn');
+    if (flipBtn) flipBtn.style.display = (videoInputDevices && videoInputDevices.length > 1) ? 'inline-block' : 'none';
+  } catch (e) {
+    console.warn('populateCameraSelect failed', e);
   }
 }
 
@@ -528,6 +652,8 @@ function stopCamera() {
   if (controls) controls.style.display = 'none';
   const btn = document.getElementById('camera-btn');
   if (btn) btn.textContent = 'Kamera';
+  const flipBtn = document.getElementById('flip-btn');
+  if (flipBtn) flipBtn.style.display = 'none';
 }
 
 async function takeSnapshot() {

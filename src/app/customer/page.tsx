@@ -180,7 +180,7 @@ export default function CustomerPage() {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   // Upload/Kamera State
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadPartId, setUploadPartId] = useState<string | null>(null);
+  const [uploadPartId] = useState<string | null>(null);
   const [uploadMsg, setUploadMsg] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -537,6 +537,7 @@ export default function CustomerPage() {
     return protocol === 'https:' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
   }, []);
 
+
   const stopCamera = useCallback(() => {
     if (mediaStream) {
       try { mediaStream.getTracks().forEach(t => t.stop()); } catch {}
@@ -552,6 +553,22 @@ export default function CustomerPage() {
     setUploadOpen(false);
     setUploadMsg("");
   }, [stopCamera]);
+
+  // Hilfsfunktion: Ableitung des Picture-Part Keys (Anlehnung an vorhandene Dateien z.B. 1_01-01_...)
+  const derivePicturePartKey = useCallback((row: Step | undefined): string | null => {
+    if (!row || row.kind !== 'data') return null;
+    // Erwartete Struktur: cells[0] = Nr., cells[3] = FTL. (Formatteil). Nur laden wenn beides sinnvoll befüllt ist.
+    const nr = (row.cells?.[0] || '').toString().trim();
+    const ftl = (row.cells?.[3] || '').toString().trim();
+    if (!nr || !ftl) return null;
+    // Ignore offensichtliche Platzhalter wie 'FTL.' oder 'FTL'
+    const ftlLower = ftl.toLowerCase();
+    if (ftlLower === 'ftl.' || ftlLower === 'ftl') return null;
+    // Schlüssel-Konvention: <Nr>_<FTL>
+    const raw = `${nr}_${ftl}`;
+    const cleaned = raw.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100);
+    return cleaned || null;
+  }, []);
 
   const onFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -584,7 +601,7 @@ export default function CustomerPage() {
       const msg = err instanceof Error ? err.message : String(err);
       setUploadMsg(`Fehler: ${msg}`);
     }
-  }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart]);
+  }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart, derivePicturePartKey]);
 
   const toggleCamera = useCallback(async () => {
     try {
@@ -646,7 +663,7 @@ export default function CustomerPage() {
       const msg = err instanceof Error ? err.message : String(err);
       setUploadMsg(`Fehler: ${msg}`);
     }
-  }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera]);
+  }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera, derivePicturePartKey]);
 
   // Separater Satz für Statistik: im diffMode immer komplette Ziel-Format-Injektion statt gefilterter Unterschiede
   const statsStepsWithStatus: Step[] = React.useMemo(() => {
@@ -710,21 +727,6 @@ export default function CustomerPage() {
   const [pictureLoading, setPictureLoading] = useState(false);
   const picturesCacheRef = useRef<Map<string, string[]>>(new Map());
 
-  // Hilfsfunktion: Ableitung des Picture-Part Keys (Anlehnung an vorhandene Dateien z.B. 1_01-01_...)
-  const derivePicturePartKey = useCallback((row: Step | undefined): string | null => {
-    if (!row || row.kind !== 'data') return null;
-    // Erwartete Struktur: cells[0] = Nr., cells[3] = FTL. (Formatteil). Nur laden wenn beides sinnvoll befüllt ist.
-    const nr = (row.cells?.[0] || '').toString().trim();
-    const ftl = (row.cells?.[3] || '').toString().trim();
-    if (!nr || !ftl) return null;
-    // Ignore offensichtliche Platzhalter wie 'FTL.' oder 'FTL'
-    const ftlLower = ftl.toLowerCase();
-    if (ftlLower === 'ftl.' || ftlLower === 'ftl') return null;
-    // Schlüssel-Konvention: <Nr>_<FTL>
-    const raw = `${nr}_${ftl}`;
-    const cleaned = raw.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100);
-    return cleaned || null;
-  }, []);
 
   // Bilder laden wenn Schritt wechselt
   useEffect(() => {

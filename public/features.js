@@ -100,23 +100,74 @@ async function readRFIDTags() {
 
 function updateDropdowns() {
   const partRows = document.querySelectorAll('.rfid-select');
+  // Build reverse map: tagId -> formatPart it's assigned to
+  const assignedByTag = {};
+  Object.keys(assignments || {}).forEach(part => {
+    const tag = assignments[part];
+    if (tag) assignedByTag[tag] = part;
+  });
+
   partRows.forEach(select => {
-    const currentValue = select.value;
+    const prevValue = select.value;
     const partId = select.id.replace('select-', '');
-    
+    const currentAssigned = assignments[partId] || "";
+
+    // Clear existing
     select.innerHTML = '';
-    rfidTags.forEach(tag => {
+
+    // 1) Always add unassigned first
+    const optEmpty = document.createElement('option');
+    optEmpty.value = "";
+    optEmpty.textContent = "(unassigned)";
+    select.appendChild(optEmpty);
+
+    // 2) If this part already has a tag, add it next (enabled).
+    if (currentAssigned) {
+      const optCurr = document.createElement('option');
+      optCurr.value = currentAssigned;
+      optCurr.textContent = `${currentAssigned} (assigned)`;
+      // Green highlight for assigned
+      optCurr.style.backgroundColor = '#d4edda';
+      optCurr.style.color = '#155724';
+      select.appendChild(optCurr);
+    }
+
+    // 3) Add all available tags (not assigned anywhere)
+    const available = rfidTags.filter(t => t && t !== currentAssigned && !assignedByTag[t]);
+    available.forEach(tag => {
       const opt = document.createElement('option');
       opt.value = tag;
-      opt.textContent = tag === "" ? "(unassigned)" : tag;
+      opt.textContent = tag;
       select.appendChild(opt);
     });
-    
-    // Set value from database if available
-    if (assignments[partId]) {
-      select.value = assignments[partId];
+
+    // 4) Add all tags assigned to other parts at the end, disabled + green
+    const usedElsewhere = rfidTags.filter(t => t && t !== currentAssigned && assignedByTag[t]);
+    usedElsewhere.forEach(tag => {
+      const opt = document.createElement('option');
+      opt.value = tag;
+      opt.textContent = `${tag} (assigned to ${assignedByTag[tag]})`;
+      opt.disabled = true;
+      opt.style.backgroundColor = '#d4edda';
+      opt.style.color = '#155724';
+      select.appendChild(opt);
+    });
+
+    // Restore selection priority: 1) current assignment 2) previous if still enabled 3) empty
+    if (currentAssigned) {
+      select.value = currentAssigned;
+    } else if (prevValue) {
+      // Find matching option and ensure it's not disabled
+      let canSelectPrev = false;
+      for (const opt of select.options) {
+        if (opt.value === prevValue && !opt.disabled) {
+          canSelectPrev = true;
+          break;
+        }
+      }
+      select.value = canSelectPrev ? prevValue : "";
     } else {
-      select.value = currentValue;
+      select.value = "";
     }
   });
 }
@@ -132,6 +183,8 @@ async function assignRFID(partId) {
   if (success) {
     checkbox.checked = value !== "";
     checkAllAssigned();
+    // Refresh dropdowns to reflect disabled/green states and prevent selecting used tags
+    updateDropdowns();
   } else {
     // Revert on error
     alert('Fehler beim Speichern der Zuordnung');
@@ -168,7 +221,6 @@ function updatePartsDisplay() {
   // Clear existing content
   allList.innerHTML = '';
   assignedList.innerHTML = '';
-  
   if (formatParts.length === 0) {
     allList.innerHTML = '<div class="no-parts">No format parts available. Please upload an HTML file first.</div>';
     assignedList.innerHTML = '<div class="no-parts">No parts to assign.</div>';
@@ -230,15 +282,18 @@ async function loadAssignments() {
       assignments = data.assignments;
       console.log(`Loaded ${Object.keys(assignments).length} assignments:`, assignments);
       updateAssignmentDisplay();
+      updateDropdowns();
     } else {
       console.warn('No assignments found in API response');
       assignments = {};
       updateAssignmentDisplay();
+      updateDropdowns();
     }
   } catch (error) {
     console.error('Error loading assignments:', error);
     assignments = {};
     updateAssignmentDisplay();
+    updateDropdowns();
   }
 }
 

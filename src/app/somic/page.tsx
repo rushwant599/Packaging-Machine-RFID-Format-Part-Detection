@@ -193,7 +193,7 @@ export default function SomicPage() {
               ref={iframeRef}
               onLoad={() => {
                 try {
-                  const win = iframeRef.current?.contentWindow as any;
+                  const win = iframeRef.current?.contentWindow as (Window & { readRFIDTags?: () => void; __rfidAutoReadDone?: boolean }) | null;
                   if (!win) return;
                   let attempts = 0;
                   const maxAttempts = 50; // ~10s @ 200ms
@@ -209,14 +209,14 @@ export default function SomicPage() {
                         clearInterval(interval);
                         if (!win.__rfidAutoReadDone) {
                           win.__rfidAutoReadDone = true;
-                          win.readRFIDTags();
+                          win.readRFIDTags?.();
                         }
                       } else if (attempts >= maxAttempts) {
                         clearInterval(interval);
                         // Last-chance: if function exists, call it once even if selects not found yet
                         if (hasFn && !win.__rfidAutoReadDone) {
                           win.__rfidAutoReadDone = true;
-                          win.readRFIDTags();
+                          win.readRFIDTags?.();
                         }
                       }
                     } catch (err) {
@@ -234,7 +234,7 @@ export default function SomicPage() {
                 <h2 className="text-xl font-semibold mb-4 text-black">Configuration</h2>
                 {/* Select File für HTML-Cache */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-black mb-1">
+                  <label htmlFor="html-upload" className="block text-sm font-medium text-black mb-1">
                     Upload-Formatchangelist
                   </label>
                   <button
@@ -248,7 +248,7 @@ export default function SomicPage() {
                     </svg>
                     Select File
                   </button>
-                  <input
+                      <input
                     ref={fileInputRef}
                     id="html-upload"
                     type="file"

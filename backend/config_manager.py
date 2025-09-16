@@ -26,49 +26,38 @@ DEFAULT_CONFIG = {
     "RFID_INVENTORY_INTERVAL_SEC": 1
 }
 
-def load_config() -> Dict[str, Any]:
-    """
-    Build configuration with precedence: ENV > FILE > DEFAULTS.
-    If the config file is missing, empty, or invalid JSON, it will be created
-    at CONFIG_PATH with the merged values (env overriding defaults).
-    """
-    # Helper: cast env var to the type of its default value (bool handled separately)
-    def _cast_env_value(key: str, value: str) -> Any:
-        if key.endswith("ENABLED"):
-            return str(value).strip().lower() == "true"
-        default_val = DEFAULT_CONFIG.get(key)
-        if default_val is None:
-            return value  # unknown key, keep as string
-        try:
-            if isinstance(default_val, int) and not isinstance(default_val, bool):
-                return int(value)
-            # Add more casts if needed (float, etc.)
-        except (TypeError, ValueError):
-            return value
+def _cast_env_value(key: str, value: str) -> Any:
+    """Cast env string to the type expected by the default config for that key."""
+    if key.endswith("ENABLED"):
+        return str(value).strip().lower() == "true"
+    default_val = DEFAULT_CONFIG.get(key)
+    if default_val is None:
+        return value  # unknown key, keep as string
+    try:
+        if isinstance(default_val, int) and not isinstance(default_val, bool):
+            return int(value)
+        # Add more casts if needed (float, etc.)
+    except (TypeError, ValueError):
         return value
+    return value
 
-    # 1) Start from defaults
-    config: Dict[str, Any] = dict(DEFAULT_CONFIG)
+def _read_file_config(path: str) -> tuple[Dict[str, Any], bool]:
+    """Return (config_dict, valid_flag). valid_flag indicates file existed and had a valid dict JSON."""
+    if not os.path.exists(path):
+        return {}, False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+            if content.strip():
+                data = json.loads(content)
+                if isinstance(data, dict):
+                    return data, True
+            return {}, False
+    except (OSError, json.JSONDecodeError):
+        return {}, False
 
-    # 2) Try to read from file
-    file_config: Dict[str, Any] = {}
-    file_valid = False
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                content = f.read()
-                if content.strip():
-                    file_config = json.loads(content)
-                    if isinstance(file_config, dict):
-                        file_valid = True
-        except (OSError, json.JSONDecodeError):
-            file_valid = False
-
-    if file_valid:
-        config.update(file_config)
-
-    # 3) Apply environment variables (override file and defaults)
-    env_map = {
+def _build_env_map() -> Dict[str, Any]:
+    return {
         "OPC_UA_SERVER_URL": os.environ.get("OPC_UA_SERVER_URL"),
         "OPC_UA_NODE_ID": os.environ.get("OPC_UA_NODE_ID"),
         "OPC_UA_ENABLED": os.environ.get("OPC_UA_ENABLED"),
@@ -84,18 +73,41 @@ def load_config() -> Dict[str, Any]:
         "RFID_CURRENT_RETENTION_SEC": os.environ.get("RFID_CURRENT_RETENTION_SEC"),
         "RFID_INVENTORY_INTERVAL_SEC": os.environ.get("RFID_INVENTORY_INTERVAL_SEC"),
     }
+
+def _apply_env_overrides(config: Dict[str, Any], env_map: Dict[str, Any]) -> None:
     for key, value in env_map.items():
         if value is not None:
-            config[key] = _cast_env_value(key, value)
+            config[key] = _cast_env_value(key, str(value))
 
-    # 4) Ensure the config file exists and is valid; if not, create/update it
+def _write_config(path: str, config: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+def load_config() -> Dict[str, Any]:
+    """
+    Build configuration with precedence: FILE > ENV > DEFAULTS.
+    If the config file is missing, empty, or invalid JSON, it will be created
+    at CONFIG_PATH with the merged values (env overriding defaults when no file exists).
+    """
+    # 1) Start from defaults
+    config: Dict[str, Any] = dict(DEFAULT_CONFIG)
+
+    # 2) Read file config (if available)
+    file_config, file_valid = _read_file_config(CONFIG_PATH)
+
+    # 3) Apply environment variables (override defaults)
+    env_map = _build_env_map()
+    _apply_env_overrides(config, env_map)
+
+    # 4) Apply file values last so FILE > ENV > DEFAULTS
+    if file_valid:
+        config.update(file_config)
+
+    # 5) Ensure the config file exists and is valid; if not, create/update it
     if not file_valid:
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        _write_config(CONFIG_PATH, config)
     return config
 
 def save_config(config: Dict[str, Any]):
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+    _write_config(CONFIG_PATH, config)

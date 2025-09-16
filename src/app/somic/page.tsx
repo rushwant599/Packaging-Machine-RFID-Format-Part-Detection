@@ -65,6 +65,7 @@ export default function SomicPage() {
   const [openSection, setOpenSection] = useState<string | null>(null);
   const api = useAPI();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     fetch(`${backendUrl}/api/config`)
@@ -189,6 +190,44 @@ export default function SomicPage() {
               className="w-full h-full border-0"
               style={{ minHeight: "80vh" }}
               title="Somic Inhalt"
+              ref={iframeRef}
+              onLoad={() => {
+                try {
+                  const win = iframeRef.current?.contentWindow as any;
+                  if (!win) return;
+                  let attempts = 0;
+                  const maxAttempts = 50; // ~10s @ 200ms
+                  const interval = setInterval(() => {
+                    attempts++;
+                    try {
+                      const hasFn = typeof win.readRFIDTags === "function";
+                      const doc = win.document as Document | undefined;
+                      const ready = doc?.readyState === "complete";
+                      const hasSelects = !!doc?.querySelector('.rfid-select') || ((doc?.getElementById('format-parts-list')?.children?.length ?? 0) > 0);
+
+                      if (hasFn && ready && hasSelects) {
+                        clearInterval(interval);
+                        if (!win.__rfidAutoReadDone) {
+                          win.__rfidAutoReadDone = true;
+                          win.readRFIDTags();
+                        }
+                      } else if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        // Last-chance: if function exists, call it once even if selects not found yet
+                        if (hasFn && !win.__rfidAutoReadDone) {
+                          win.__rfidAutoReadDone = true;
+                          win.readRFIDTags();
+                        }
+                      }
+                    } catch (err) {
+                      clearInterval(interval);
+                      console.error('RFID auto-read polling failed:', err);
+                    }
+                  }, 200);
+                } catch (e) {
+                  console.error("Failed to setup auto-run for readRFIDTags:", e);
+                }
+              }}
             />
             {showConfig && (
               <div className="absolute top-12 right-2 z-20 bg-white border border-gray-300 rounded shadow-lg p-6 w-[350px] max-w-full">

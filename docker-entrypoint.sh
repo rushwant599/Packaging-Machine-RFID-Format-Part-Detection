@@ -21,8 +21,10 @@ if [ -f /etc/nginx/templates/nginx.conf.template ]; then
     : "${SERVER_IP:=_}"
     : "${NGINX_SSL_CERT:=/etc/nginx/certs/10.11.36.40.pem}"
     : "${NGINX_SSL_KEY:=/etc/nginx/certs/10.11.36.40-key.pem}"
+    # Also export lowercase aliases in case the template uses them
     export SERVER_IP NGINX_SSL_CERT NGINX_SSL_KEY
-    envsubst '${SERVER_IP} ${NGINX_SSL_CERT} ${NGINX_SSL_KEY}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf
+    export server_ip="$SERVER_IP" nginx_ssl_cert="$NGINX_SSL_CERT" nginx_ssl_key="$NGINX_SSL_KEY"
+    envsubst '${SERVER_IP} ${NGINX_SSL_CERT} ${NGINX_SSL_KEY} ${server_ip} ${nginx_ssl_cert} ${nginx_ssl_key}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf
 fi
 
 # Start Backend in background
@@ -34,10 +36,21 @@ BACKEND_PID=$!
 # Wait a moment for backend to start
 sleep 3
 
-# Start Frontend in background
-echo "Starting Frontend..."
+# Start Frontend (Next.js standalone) in background
+echo "Starting Frontend (Next.js standalone)..."
 cd /app
-npm start &
+# Ensure Next.js binds on all interfaces so Nginx (127.0.0.1) can reach it
+export HOSTNAME="0.0.0.0"
+export PORT="3000"
+if [ -f /app/server.js ]; then
+    node server.js &
+elif [ -f /app/.next/standalone/server.js ]; then
+    # Fallback in case the standalone folder wasn't flattened
+    node .next/standalone/server.js &
+else
+    echo "Error: Next.js standalone server not found at /app/server.js or /app/.next/standalone/server.js"
+    exit 1
+fi
 FRONTEND_PID=$!
 
 # Start Nginx (foreground disabled to keep simple PIDs; we'll background it)

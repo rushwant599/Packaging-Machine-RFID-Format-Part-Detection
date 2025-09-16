@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
     '192.168.178.80', 
     ...localIPv4s,
   ],
+  // Produce a self-contained server output suitable for Docker images
+  output: 'standalone',
 };
 
 export default nextConfig;

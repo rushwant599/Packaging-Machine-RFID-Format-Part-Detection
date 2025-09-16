@@ -51,10 +51,12 @@ COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY --from=backend-builder /app/backend ./backend
 
 # Copy frontend build
-COPY --from=frontend-builder /app/.next ./.next
+# Use Next.js standalone output for a self-contained server
+# Copy the standalone server (includes minimal node_modules and server.js)
+COPY --from=frontend-builder /app/.next/standalone ./
+# Copy static assets and public
+COPY --from=frontend-builder /app/.next/static ./.next/static
 COPY --from=frontend-builder /app/public ./public
-COPY --from=frontend-builder /app/package.json ./package.json
-COPY --from=frontend-builder /app/node_modules ./node_modules
 
 # Copy startup scripts
 COPY docker-entrypoint.sh ./

@@ -849,7 +849,9 @@ export default function CustomerPage() {
                 </div>
               </div>
               <div style={{ flex:1, minHeight:0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {/* Zentrier-Wrapper: zentriert vertikal bei freiem Platz, sonst normal top-aligned */}
+                <div style={{ display:'flex', flexDirection:'column', gap: 8, marginTop:'auto', marginBottom:'auto', alignSelf:'stretch' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {current.kind === 'data' && (
                     <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 700, color: '#111', letterSpacing: '.06em', textTransform: 'uppercase' }}>{current.section}</div>
                   )}
@@ -859,8 +861,8 @@ export default function CustomerPage() {
                   {current.kind === 'line' && current.lineContentHtml && (
                     <div style={{ fontSize: STEP_FONT_SIZE }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
                   )}
-                </div>
-                {current.kind === 'data' && current.headerCells && (
+                  </div>
+                  {current.kind === 'data' && current.headerCells && (
                   <div ref={tableContainerRef} style={{ width:'100%', position:'relative' }}>
                     <div
                       style={compactTable ? { width:'100%' } : { transform:`scale(${tableScale})`, transformOrigin:'left top', width: tableScale < 1 ? `${100 / tableScale}%` : '100%', transition:'transform .15s ease-out' }}>
@@ -928,14 +930,15 @@ export default function CustomerPage() {
                     )}
                   </div>
                 )}
-                {/* Bilder Bereich */}
-                {/* Bilder nur anzeigen, wenn es sich um einen echten Formatteil handelt UND mindestens 1 Bild vorhanden oder gerade lädt */}
-                {current.kind === 'data' && (() => {
+                  {/* Bilder Bereich */}
+                  {/* Bilder nur anzeigen, wenn es sich um einen echten Formatteil handelt UND mindestens 1 Bild vorhanden oder gerade lädt */}
+                  {current.kind === 'data' && (() => {
                   const key = derivePicturePartKey(current);
                   if (!key) return null; // kein echtes Formatteil
                   return (
                     <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {/* Upload/Aktionen */}
+                      {/*
+                      {/* Upload/Aktionen 
                       <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                         <button
                           type="button"
@@ -946,6 +949,7 @@ export default function CustomerPage() {
                           <span style={{ fontSize:'.65rem', color:'#000' }}>{uploadMsg}</span>
                         )}
                       </div>
+                      */}
                       {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color:'#555' }}>Lade Bild…</div>}
                       {!pictureLoading && currentPictures.length > 0 && (
                         <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
@@ -979,8 +983,9 @@ export default function CustomerPage() {
                         <div style={{ fontSize: '.55rem', color:'#777' }}>Kein Bild vorhanden</div>
                       )}
                     </div>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink:0 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>

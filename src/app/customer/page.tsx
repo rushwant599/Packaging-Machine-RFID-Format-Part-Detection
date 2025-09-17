@@ -452,17 +452,19 @@ export default function CustomerPage() {
     try {
       let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
       if (!tmp) {
-        const { protocol, hostname, port } = window.location;
-        const isStandardPort = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
-        if (protocol === 'https:' || isStandardPort) {
-          tmp = `${protocol}//${hostname}`;
+        const { protocol, host } = window.location; // host contains hostname[:port]
+        const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
+        if (protocol === 'https:' || isStandard) {
+          tmp = `${protocol}//${host}`; // preserves port when mapped like :4400
         } else {
           const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-          tmp = `${protocol}//${hostname}:${p}`;
+          tmp = `${protocol}//${host.split(':')[0]}:${p}`;
         }
       }
       resolvedBaseHttp = tmp;
-    } catch {}
+    } catch  {
+      // ignore
+    }
     const connect = () => {
       try {
         const base = resolvedBaseHttp.replace(/^http/, 'ws');

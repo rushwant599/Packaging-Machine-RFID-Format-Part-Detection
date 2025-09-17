@@ -54,7 +54,7 @@ backend/.env
 .env.development.local
 .env.test.local
 .env.production.local
-
+!/src/app/test/
 # Cache & Temporary Files
 .DS_Store
 

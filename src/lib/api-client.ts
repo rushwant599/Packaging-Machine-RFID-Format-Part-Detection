@@ -4,15 +4,21 @@
 // Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
 const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+// Prefer explicit NEXT_PUBLIC_BACKEND_URL when provided (for CI/docker overrides).
+// Otherwise on the client build the base using window.location.host which includes the port when present
 if (!resolvedBase && typeof window !== 'undefined') {
-  const { protocol, hostname, port } = window.location;
-  const isStandardPort = (protocol === 'https:' && (port === '' || port === '443')) || (protocol === 'http:' && (port === '' || port === '80'));
-  // If we're on HTTPS (nginx) or a standard port, prefer same-origin without explicit port
-  // Else (e.g., local dev on :3000) target the backend port explicitly
-  if (protocol === 'https:' || isStandardPort) {
-    resolvedBase = `${protocol}//${hostname}`;
-  } else {
-    resolvedBase = `${protocol}//${hostname}:${backendPort}`;
+  try {
+    const { protocol, host } = window.location; // host == hostname[:port]
+    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
+    // If running under https or a standard host, use the full host (preserves :port when mapped by Docker)
+    if (protocol === 'https:' || isStandard) {
+      resolvedBase = `${protocol}//${host}`;
+    } else {
+      // development: typical case where frontend is on :3000 and backend listens on separate port
+      resolvedBase = `${protocol}//${host.split(':')[0]}:${backendPort}`;
+    }
+  } catch {
+    // ignore and fallback below
   }
 }
 // Fallback (Dev Einzelstart): localhost

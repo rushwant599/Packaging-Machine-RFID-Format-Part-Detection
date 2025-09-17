@@ -5,13 +5,15 @@ let assignments = {}; // Format part -> RFID tag assignments from database
 // API configuration: prefer same-origin under HTTPS/nginx, else dev fallback to :8001
 const API_BASE_URL = (() => {
   try {
-    const { protocol, hostname, port } = window.location;
-    const isStandard = (protocol === 'https:' && (!port || port === '443')) || (protocol === 'http:' && (!port || port === '80'));
+    const { protocol, host } = window.location; // host includes port when present
+    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
     if (protocol === 'https:' || isStandard) {
-      return `${protocol}//${hostname}`; // nginx reverse proxy
+      return `${protocol}//${host}`; // nginx reverse proxy - host preserves port like :4400
     }
-    return `${protocol}//${hostname}:8001`; // local dev direct backend
-  } catch {
+    // dev: frontend likely on :3000 and backend on :8001 -> use hostname part and backend port
+    const hostnameOnly = host.split(':')[0];
+    return `${protocol}//${hostnameOnly}:8001`;
+  } catch (e) {
     return 'http://localhost:8001';
   }
 })();

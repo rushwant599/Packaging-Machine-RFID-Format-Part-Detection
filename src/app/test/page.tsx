@@ -40,15 +40,15 @@ export default function TestLiveEventIdsPage() {
         setWsUrl(`${wsProto}//${u.host}/ws/opc-ua`);
         return;
       }
-      const { protocol, hostname, port } = window.location;
+      const { protocol, host } = window.location; // host includes port when present
       const isHttps = protocol === "https:";
+      const isStandard = (isHttps && (host.endsWith(':443') || !host.includes(':'))) || (!isHttps && (host.endsWith(':80') || !host.includes(':')));
       let targetHost: string;
-      if (port === "3000") {
-        targetHost = `${hostname}:8001`;
-      } else if (port) {
-        targetHost = `${hostname}:${port}`;
+      if (isHttps || isStandard) {
+        targetHost = host; // use host including mapped port like :4400
       } else {
-        targetHost = hostname;
+        // dev scenario: frontend likely on :3000 -> target backend on :8001
+        targetHost = `${host.split(':')[0]}:8001`;
       }
       const wsProto = isHttps ? "wss:" : "ws:";
       setWsUrl(`${wsProto}//${targetHost}/ws/opc-ua`);

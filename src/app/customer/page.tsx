@@ -200,7 +200,7 @@ export default function CustomerPage() {
       };
       bc.addEventListener('message', onMsg);
       return () => { bc.removeEventListener('message', onMsg); bc.close(); };
-    } catch (e) {
+    } catch {
       // BroadcastChannel not supported; ignore
       return () => {};
     }

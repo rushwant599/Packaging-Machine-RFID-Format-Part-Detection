@@ -160,7 +160,7 @@ export default function SomicPage() {
           const bc = new BroadcastChannel('somic-config-updates');
           bc.postMessage({ THEME_COLOR: payload.THEME_COLOR });
           bc.close();
-        } catch (e) {
+        } catch {
           // BroadcastChannel not available in all environments; ignore
         }
       } else {

@@ -552,6 +552,7 @@ class ConfigUpdate(BaseModel):
     OPC_UA_EVENT_TYPE: Optional[str] = None
     OPC_UA_EVENT_INTERVAL_MS: Optional[int] = None
     OPC_UA_EVENT_MAX_EVENTS: Optional[int] = None
+    THEME_COLOR: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -1073,6 +1074,11 @@ def get_config():
 async def update_config(update: ConfigUpdate):
     global opc_manager, rfid_opc_manager, opc_event_listener
     config = load_config()
+    # Log the raw incoming update payload for debugging
+    try:
+        logger.info(f"Received config update payload: {update.dict()}")
+    except Exception:
+        logger.info("Received config update payload (could not serialize)")
     changed = False
 
     
@@ -1089,7 +1095,8 @@ async def update_config(update: ConfigUpdate):
         "RFID_INVENTORY_ENABLED", "RFID_READER_IP", "RFID_READER_PORT", "RFID_READER_ANT",
         "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC",
         "OPC_UA_EVENT_ENABLED", "OPC_UA_EVENT_SERVER_URL", "OPC_UA_EVENT_TYPE",
-        "OPC_UA_EVENT_INTERVAL_MS", "OPC_UA_EVENT_MAX_EVENTS"
+        "OPC_UA_EVENT_INTERVAL_MS", "OPC_UA_EVENT_MAX_EVENTS",
+        "THEME_COLOR"
     ]:
         value = getattr(update, key)
         if value is not None:

@@ -177,6 +177,34 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
 
 export default function CustomerPage() {
   const { isMobile, isTablet, width } = useViewport();
+  // Fetch color from config
+  const [color, setColor] = React.useState<string>("#1976d2");
+  React.useEffect(() => {
+    const url = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? `${BACKEND_URL}/api/config` : '/api/config';
+    fetch(url)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data && typeof data.COLOR === "string") setColor(data.COLOR);
+        else if (data && typeof data.THEME_COLOR === "string") setColor(data.THEME_COLOR);
+      })
+      .catch(() => { /* ignore errors silently */ });
+  }, []);
+
+  // Listen for color updates from settings (other tabs/pages)
+  useEffect(() => {
+    try {
+      const bc = new BroadcastChannel('somic-config-updates');
+      const onMsg = (ev: MessageEvent) => {
+        const d = ev.data as { THEME_COLOR?: string } | null;
+        if (d && typeof d.THEME_COLOR === 'string') setColor(d.THEME_COLOR);
+      };
+      bc.addEventListener('message', onMsg);
+      return () => { bc.removeEventListener('message', onMsg); bc.close(); };
+    } catch (e) {
+      // BroadcastChannel not supported; ignore
+      return () => {};
+    }
+  }, []);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   // Upload/Kamera State
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -913,7 +941,7 @@ export default function CustomerPage() {
                               const injected = current._injectedValue && [2,3,4].includes(i);
                               const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
                               const changed = diffMode && fromVal !== undefined && fromVal !== c && [2,3,4].includes(i);
-                              const cellStyle: React.CSSProperties = {
+                              let cellStyle: React.CSSProperties = {
                                 border:'1px solid #c5c5c5',
                                 padding:'6px 6px',
                                 background: changed ? '#ffe8e6' : (injected ? '#fff9e6':'#fff'),
@@ -927,6 +955,10 @@ export default function CustomerPage() {
                                 lineHeight:1.25,
                                 verticalAlign:'top'
                               };
+                              // Apply color to FTL. column
+                              if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g,"") === "ftl") {
+                                cellStyle = { ...cellStyle, background: color, color: '#fff', fontWeight: 600 };
+                              }
                               return <td key={key} style={cellStyle}>
                                 {changed ? (
                                   <div style={{ display:'flex', flexDirection:'column', gap:2 }}>

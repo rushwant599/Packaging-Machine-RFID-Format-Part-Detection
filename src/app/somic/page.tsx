@@ -18,6 +18,7 @@ type Config = {
   RFID_READER_ANT: string;
   RFID_CURRENT_RETENTION_SEC: number;
   RFID_INVENTORY_INTERVAL_SEC: number;
+  THEME_COLOR?: string;
 };
 
 const defaultConfig: Config = {
@@ -35,6 +36,7 @@ const defaultConfig: Config = {
   RFID_READER_ANT: "F",
   RFID_CURRENT_RETENTION_SEC: 10,
   RFID_INVENTORY_INTERVAL_SEC: 1,
+  THEME_COLOR: "#1976d2", // Default color
 };
 
 const backendUrl = ((): string => {
@@ -62,6 +64,7 @@ export default function SomicPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState<Config>(defaultConfig);
+  // Remove separate color state, use config.THEME_COLOR only
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
@@ -69,6 +72,7 @@ export default function SomicPage() {
   const [openSection, setOpenSection] = useState<string | null>(null);
   const api = useAPI();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const colorInputRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -86,10 +90,11 @@ export default function SomicPage() {
           OPC_UA_ENABLED: !!data.OPC_UA_ENABLED,
           RFID_INVENTORY_ENABLED: !!data.RFID_INVENTORY_ENABLED,
           RFID_READER_IP: data.RFID_READER_IP || "",
-            RFID_READER_PORT: data.RFID_READER_PORT ?? 2111,
-            RFID_READER_ANT: data.RFID_READER_ANT || "F",
-            RFID_CURRENT_RETENTION_SEC: data.RFID_CURRENT_RETENTION_SEC ?? 10,
-            RFID_INVENTORY_INTERVAL_SEC: data.RFID_INVENTORY_INTERVAL_SEC ?? 1,
+          RFID_READER_PORT: data.RFID_READER_PORT ?? 2111,
+          RFID_READER_ANT: data.RFID_READER_ANT || "F",
+          RFID_CURRENT_RETENTION_SEC: data.RFID_CURRENT_RETENTION_SEC ?? 10,
+          RFID_INVENTORY_INTERVAL_SEC: data.RFID_INVENTORY_INTERVAL_SEC ?? 1,
+          THEME_COLOR: data.THEME_COLOR || "#1976d2",
         });
         setLoading(false);
       })
@@ -129,21 +134,35 @@ export default function SomicPage() {
     const checked = (e.target as HTMLInputElement).checked !== undefined ? (e.target as HTMLInputElement).checked : undefined;
     setConfig((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : (type === 'number' ? Number(value) : value),
+      [name]: name === "THEME_COLOR"
+        ? value
+        : (type === "checkbox" ? checked : (type === "number" ? Number(value) : value)),
     }));
   };
 
   const handleSave = async () => {
     setSaving(true);
     setSaveMsg("");
+    // Read color directly from the input as a last-resort source of truth
+    const selectedColor = colorInputRef.current?.value ?? config.THEME_COLOR ?? "#1976d2";
+    const payload = { ...config, THEME_COLOR: selectedColor };
+    console.debug("Saving config payload:", payload);
     try {
       const res = await fetch(`${backendUrl}/api/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         setSaveMsg("Configuration saved successfully.");
+        try {
+          // Notify other open tabs/pages about the updated color so they can refresh UI
+          const bc = new BroadcastChannel('somic-config-updates');
+          bc.postMessage({ THEME_COLOR: payload.THEME_COLOR });
+          bc.close();
+        } catch (e) {
+          // BroadcastChannel not available in all environments; ignore
+        }
       } else {
         setSaveMsg("Failed to save configuration.");
       }
@@ -292,6 +311,21 @@ export default function SomicPage() {
                     }}
                     className="space-y-4"
                   >
+                    {/* Color Picker */}
+                    <div className="flex items-center mb-2">
+                      <label htmlFor="color" className="block text-sm font-medium text-black mr-2">Color</label>
+                      <input
+                        type="color"
+                        id="color"
+                        name="THEME_COLOR"
+                        ref={colorInputRef}
+                        value={config.THEME_COLOR ?? "#1976d2"}
+                        onChange={handleChange}
+                        className="h-8 w-12 p-0 border-none bg-transparent cursor-pointer"
+                        style={{ background: "none" }}
+                      />
+                      <span className="ml-2 text-xs text-gray-600">{config.THEME_COLOR ?? "#1976d2"}</span>
+                    </div>
                     <div className="flex items-center">
                       <input
                         type="checkbox"

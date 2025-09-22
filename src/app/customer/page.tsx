@@ -956,7 +956,8 @@ export default function CustomerPage() {
                                 verticalAlign:'top'
                               };
                               // Apply color to FTL. column
-                              if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g,"") === "ftl") {
+                              // Todo: Improve logic to detect FTL./Nr. column 
+                              if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g,"") === "nr") {
                                 cellStyle = { ...cellStyle, background: color, color: '#fff', fontWeight: 600 };
                               }
                               return <td key={key} style={cellStyle}>

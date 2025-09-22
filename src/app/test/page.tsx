@@ -25,9 +25,17 @@ export default function TestLiveEventIdsPage() {
   const [count, setCount] = useState<number | undefined>(undefined);
   const [timestamp, setTimestamp] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<"connecting" | "open" | "closed" | "error">("connecting");
+  const [idTimestamps, setIdTimestamps] = useState<Map<string, number>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closedByUserRef = useRef<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  // Update current time every second to refresh "new" highlighting
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const [wsUrl, setWsUrl] = useState<string>("");
   useEffect(() => {
@@ -91,7 +99,26 @@ export default function TestLiveEventIdsPage() {
             (data as { type?: string }).type === "live_event_ids"
           ) {
             const msg = data as LiveEventIdsMessage;
-            if (Array.isArray(msg.ids)) setIds(msg.ids);
+            if (Array.isArray(msg.ids)) {
+              const now = Date.now();
+              setIds(msg.ids);
+              setIdTimestamps(prev => {
+                const newMap = new Map(prev);
+                msg.ids.forEach(id => {
+                  if (!newMap.has(id)) {
+                    newMap.set(id, now);
+                  }
+                });
+                // Clean up timestamps for IDs no longer present
+                const currentIds = new Set(msg.ids);
+                Array.from(newMap.keys()).forEach(id => {
+                  if (!currentIds.has(id)) {
+                    newMap.delete(id);
+                  }
+                });
+                return newMap;
+              });
+            }
             if (typeof msg.count === "number") setCount(msg.count);
             if (typeof msg.timestamp === "number") setTimestamp(msg.timestamp);
           }
@@ -153,7 +180,17 @@ export default function TestLiveEventIdsPage() {
         .then(r => (r.ok ? r.json() : null))
         .then((j: unknown) => {
           if (isLiveEventIdsSnapshot(j)) {
+            const now = Date.now();
             setIds(j.ids);
+            setIdTimestamps(prev => {
+              const newMap = new Map(prev);
+              j.ids.forEach(id => {
+                if (!newMap.has(id)) {
+                  newMap.set(id, now);
+                }
+              });
+              return newMap;
+            });
             if (typeof j.count === "number") setCount(j.count);
             if (typeof j.timestamp === "number") setTimestamp(j.timestamp);
           }
@@ -192,11 +229,28 @@ export default function TestLiveEventIdsPage() {
         <p style={{ fontSize: 14, opacity: 0.8 }}>Keine IDs empfangen.</p>
       ) : (
         <ul style={{ paddingLeft: 20 }}>
-          {ids.map((id) => (
-            <li key={id} style={{ fontFamily: "monospace", fontSize: 14, wordBreak: "break-all" }}>
-              {id}
-            </li>
-          ))}
+          {[...ids].sort((a, b) => a.localeCompare(b)).map((id) => {
+            const idAge = idTimestamps.get(id);
+            const isRecent = idAge && (currentTime - idAge) < 5000; // 5 seconds
+            return (
+              <li 
+                key={id} 
+                style={{ 
+                  fontFamily: "monospace", 
+                  fontSize: 14, 
+                  wordBreak: "break-all",
+                  backgroundColor: isRecent ? "#22c55e20" : "transparent",
+                  padding: "0px 1px",
+                  //borderRadius: "3px",
+                  //border: isRecent ? "1px solid #22c55e" : "1px solid transparent",
+                  marginBottom: "2px"
+                }}
+              >
+                {id}
+                {isRecent && <span style={{ color: "#22c55e", marginLeft: "8px", fontSize: "12px" }}>●</span>}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

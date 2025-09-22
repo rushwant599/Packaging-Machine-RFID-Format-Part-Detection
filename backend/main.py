@@ -296,6 +296,9 @@ async def lifespan(app: FastAPI):
                         "count": len(ids),
                         "timestamp": now_ts
                     })
+            except asyncio.CancelledError:
+                # Task was cancelled during shutdown, exit gracefully
+                break
             except Exception as e:  # noqa: BLE001
                 logger.debug("Periodic live_event_ids broadcast error: %s", e)
 
@@ -403,13 +406,13 @@ async def lifespan(app: FastAPI):
         _rfid_poll_task.cancel()
         try:
             await _rfid_poll_task
-        except Exception:  # noqa: BLE001
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001
             pass
     if _live_event_broadcast_task:
         _live_event_broadcast_task.cancel()
         try:
             await _live_event_broadcast_task
-        except Exception:  # noqa: BLE001
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001
             pass
     if assignment_manager:
         await assignment_manager.close()

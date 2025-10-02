@@ -206,6 +206,7 @@ export default function CustomerPage() {
     }
   }, []);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [footerHtml, setFooterHtml] = useState<string | null>(null);
   // Upload/Kamera State
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadPartId] = useState<string | null>(null);
@@ -273,6 +274,14 @@ export default function CustomerPage() {
           // Erzeuge ein Blob-URL für das HTML
           const blob = new Blob([html], { type: "text/html" });
           setFileUrl(URL.createObjectURL(blob));
+          try {
+            // Versuche Footer-Block aus dem HTML zu extrahieren (inkl. <footer>..</footer>)
+            const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(html);
+            if (m && m[0]) setFooterHtml(m[0]);
+            else setFooterHtml(null);
+          } catch {
+            setFooterHtml(null);
+          }
         }
       });
   }, []);
@@ -1039,6 +1048,10 @@ export default function CustomerPage() {
                     );
                   })()}
                 </div>
+                {/* Footer aus dem gecachten customer HTML anzeigen, falls vorhanden (innerhalb des scrollbaren Bereichs) */}
+                {footerHtml && (
+                  <div style={{ marginTop: 6, borderTop: '1px solid #e6e6e6', paddingTop: 8, color: '#333', fontSize: '.78rem' }} dangerouslySetInnerHTML={{ __html: footerHtml }} />
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink:0 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>

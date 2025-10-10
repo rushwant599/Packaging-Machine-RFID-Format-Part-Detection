@@ -14,11 +14,16 @@ This document lists all HTTP and WebSocket endpoints provided by the backend. Pa
 
 - GET `/api/customer-html`  
   Fetch the cached customer HTML (raw HTML response). Returns empty string if none.
+  - Query params:
+    - `original` (bool, default false) – when true, returns the original uploaded HTML (without injection) if available. Default returns the injected version.
 
 - POST `/api/customer-html`  
   Upload and cache customer HTML.
   - Body: multipart/form-data with field `file`
-  - Returns: uploaded HTML as the response body
+  - Behavior: Saves two files on disk under `/data`:
+    - `customer-html-cache.html` (injected version; also mirrored to `customer-html-cache.injected.html` for convenience)
+    - `customer-html-cache.original.html` (byte-exact original upload)
+  - Returns: the injected HTML as the response body (backward compatible)
 
 - GET `/api/main-table-rows`  
   Extract rows from `<table class="main">` in the cached HTML.

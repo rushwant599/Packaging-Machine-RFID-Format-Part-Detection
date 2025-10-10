@@ -510,6 +510,10 @@ async def _cors_debug_logger(request, call_next):  # noqa: D401
 CACHE_DIR = Path(__file__).parent.parent / "data"
 CACHE_DIR.mkdir(exist_ok=True)
 HTML_CACHE_PATH = CACHE_DIR / "customer-html-cache.html"
+# Also keep a copy of the original (non-injected) upload for reference/processing if needed
+HTML_CACHE_ORIGINAL_PATH = CACHE_DIR / "customer-html-cache.original.html"
+# Optional secondary path name for the injected copy (convenience alongside the primary path)
+HTML_CACHE_INJECTED_COPY_PATH = CACHE_DIR / "customer-html-cache.injected.html"
 
 # Pydantic models for request/response
 class PasswordRequest(BaseModel):
@@ -631,9 +635,15 @@ async def verify_password(request: PasswordRequest):
         return PasswordResponse(success=False, message="Falsches Passwort!")
 
 @app.get("/api/customer-html")
-async def get_customer_html():
+async def get_customer_html(original: bool = False):
     """Get cached customer HTML"""
     try:
+        # When explicitly requested, return the original (non-injected) HTML if it exists
+        if original and HTML_CACHE_ORIGINAL_PATH.exists():
+            with open(HTML_CACHE_ORIGINAL_PATH, "r", encoding="utf-8") as f:
+                content = f.read()
+            return HTMLResponse(content=content)
+        # Default: return the injected HTML cache (backward compatible behavior)
         if HTML_CACHE_PATH.exists():
             with open(HTML_CACHE_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -864,9 +874,23 @@ async def upload_customer_html(file: UploadFile = File(...)):
         # apply injection
         injected_html = inject_rfid_column_and_ws(html_text)
 
-        # Save to cache file
+        # Save original upload (bytes, no changes)
+        try:
+            with open(HTML_CACHE_ORIGINAL_PATH, "wb") as f_orig:
+                f_orig.write(content)
+            logger.info("Saved original HTML upload to %s (%d bytes)", HTML_CACHE_ORIGINAL_PATH, len(content))
+        except Exception as we:  # noqa: BLE001
+            logger.error("Failed to save original HTML to %s: %s", HTML_CACHE_ORIGINAL_PATH, we)
+
+        # Save injected HTML to the primary cache path (backward compatible)
         with open(HTML_CACHE_PATH, "w", encoding="utf-8") as f:
             f.write(injected_html)
+        # Also write a convenience injected copy under a distinct filename if possible
+        try:
+            with open(HTML_CACHE_INJECTED_COPY_PATH, "w", encoding="utf-8") as f_inj:
+                f_inj.write(injected_html)
+        except Exception as we:  # noqa: BLE001
+            logger.debug("Optional write of injected copy failed (%s): %s", HTML_CACHE_INJECTED_COPY_PATH, we)
 
         # Return the injected content as HTML
         return HTMLResponse(content=injected_html)

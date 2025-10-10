@@ -21,6 +21,29 @@ class FormatDataParser:
     
     def __init__(self, html_file_path: str):
         self.html_file_path = Path(html_file_path)
+        # Prefer the original (uninjected) cache when typical injected cache name is provided
+        self._preferred_path = self._resolve_preferred_path(self.html_file_path)
+
+    def _resolve_preferred_path(self, path: Path) -> Path:
+        """Resolve to the original cache file if available.
+
+        If the provided path points to the injected cache (customer-html-cache.html
+        or customer-html-cache.injected.html), try to use the sibling original file
+        named customer-html-cache.original.html. On any failure or if not present,
+        fall back to the provided path.
+        """
+        try:
+            injected_names = {
+                "customer-html-cache.html",
+                "customer-html-cache.injected.html",
+            }
+            if path.name in injected_names:
+                original = path.with_name("customer-html-cache.original.html")
+                if original.exists():
+                    return original
+        except Exception:
+            pass
+        return path
     
     def parse(self) -> Dict[str, Any]:
         """Main parsing method - returns complete format data"""
@@ -97,14 +120,15 @@ class FormatDataParser:
     
     def _read_html_file(self) -> str:
         """Read HTML file content"""
-        if not self.html_file_path.exists():
-            raise FileNotFoundError(f"Die Datei '{self.html_file_path}' wurde nicht gefunden.")
+        path = getattr(self, "_preferred_path", self.html_file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Die Datei '{path}' wurde nicht gefunden.")
         
         try:
-            with open(self.html_file_path, 'r', encoding='utf-8') as file:
+            with open(path, 'r', encoding='utf-8') as file:
                 return file.read()
         except Exception as e:
-            raise IOError(f"Fehler beim Lesen der Datei '{self.html_file_path}': {e}")
+            raise IOError(f"Fehler beim Lesen der Datei '{path}': {e}")
     
     def _extract_script_content(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract script content from FormatData element"""

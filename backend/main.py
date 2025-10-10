@@ -862,12 +862,44 @@ async def upload_customer_html(file: UploadFile = File(...)):
                 meta['content'] = '1'
                 head.append(meta)
 
-                # Reference external JS file served from /static
-                script_tag = soup.new_tag('script', src='/static/somic-rfid.js')
-                if soup.body:
-                    soup.body.append(script_tag)
-                else:
-                    soup.append(script_tag)
+                # Optional legend enabled by default; can be disabled by setting content='0' later
+                meta_legend = soup.new_tag('meta')
+                meta_legend['name'] = 'somic-rfid-legend'
+                meta_legend['content'] = '1'
+                head.append(meta_legend)
+
+                # Provide backend origin hint for WS when served via different frontend origin
+                try:
+                    backend_host = os.getenv('BACKEND_HOST', '127.0.0.1')
+                    if backend_host in ('0.0.0.0', '::'):
+                        backend_host = '127.0.0.1'
+                    backend_port = int(os.getenv('BACKEND_PORT', '8001'))
+                    backend_origin = f"http://{backend_host}:{backend_port}"
+                    meta_origin = soup.new_tag('meta')
+                    meta_origin['name'] = 'somic-backend-origin'
+                    meta_origin['content'] = backend_origin
+                    head.append(meta_origin)
+                except Exception:
+                    pass
+
+                # Inline the helper JS to avoid cross-origin static file issues
+                try:
+                    static_path = Path(__file__).parent / 'static' / 'somic-rfid.js'
+                    script_code = static_path.read_text(encoding='utf-8', errors='ignore')
+                    inline = soup.new_tag('script')
+                    inline['id'] = 'somic-rfid-inline'
+                    inline.string = script_code
+                    if soup.body:
+                        soup.body.append(inline)
+                    else:
+                        soup.append(inline)
+                except Exception:
+                    # Fallback to external reference if inline failed
+                    script_tag = soup.new_tag('script', src='/static/somic-rfid.js')
+                    if soup.body:
+                        soup.body.append(script_tag)
+                    else:
+                        soup.append(script_tag)
 
             return str(soup)
 

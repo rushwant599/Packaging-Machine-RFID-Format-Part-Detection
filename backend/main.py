@@ -24,6 +24,7 @@ from simple_assignment_db import SimpleAssignmentManager
 from config_manager import load_config, save_config
 from opc_event_bytes_listener import OPCUAEventBytesListener
 from dataclasses import asdict
+from bs4 import BeautifulSoup
 
 # Load environment variables
 env_path = Path(__file__).parent / ".env"
@@ -695,13 +696,180 @@ async def upload_customer_html(file: UploadFile = File(...)):
         
         # Read the uploaded file
         content = await file.read()
-        
+        html_text = content.decode("utf-8")
+
+        def inject_rfid_column_and_ws(html: str) -> str:
+            try:
+                soup = BeautifulSoup(html, "lxml")
+            except Exception:
+                soup = BeautifulSoup(html, "html.parser")
+
+            # Avoid double injection
+            if soup.find('meta', attrs={'name': 'somic-rfid-injected'}):
+                return str(soup)
+
+            injected_any = False
+            logger.info("inject_rfid: tables found=%d", len(soup.find_all('table')))
+            tables = soup.find_all('table')
+            for table in tables:
+                # Only operate on the main process table
+                table_classes = table.get('class') or []
+                if 'main' not in table_classes:
+                    continue
+                # header injection: try thead first, otherwise find the first <tr> that contains <th>
+                header_tr = None
+                # Prefer the explicit header row for main table
+                header_tr = table.select_one('tr.caption[name="TableHead"]')
+                if not header_tr:
+                    thead = table.find('thead')
+                    if thead and thead.find('tr'):
+                        header_tr = thead.find('tr')
+                if not header_tr:
+                    # fallback: first row that contains <th>
+                    for candidate in table.find_all('tr'):
+                        if candidate.find('th'):
+                            header_tr = candidate
+                            break
+
+                if header_tr:
+                    headers = header_tr.find_all('th')
+                    # Remove duplicate 'RFID' headers if present
+                    rfid_ths = [h for h in headers if ((h.get_text() or '').strip().lower() == 'rfid')]
+                    if len(rfid_ths) > 1:
+                        for extra in rfid_ths[1:]:
+                            try:
+                                extra.decompose()
+                            except Exception:
+                                pass
+                        headers = header_tr.find_all('th')  # refresh after removal
+                    has_rfid = any((h.get_text() or '').strip().lower() == 'rfid' for h in headers)
+                    if not has_rfid:
+                        new_th = soup.new_tag('th')
+                        new_th.string = 'RFID'
+                        new_th['style'] = 'padding:6px 8px;background:#adafb0'
+                        if len(headers) >= 2:
+                            headers[1].insert_after(new_th)
+                        else:
+                            header_tr.append(new_th)
+                        injected_any = True
+                        logger.debug("inject_rfid: inserted header in table (header_tr)")
+
+                        # After adding a new column, adjust any 'line' rows that rely on colspan
+                        for row in table.find_all('tr'):
+                            row_classes = row.get('class') or []
+                            if 'line' in row_classes:
+                                for cell in row.find_all(['td', 'th']):
+                                    if 'colspan' in cell.attrs:
+                                        try:
+                                            cs = int(cell['colspan'])
+                                            cell['colspan'] = str(cs + 1)
+                                            logger.debug("inject_rfid: incremented colspan on line row to %s", cell['colspan'])
+                                        except Exception:
+                                            pass
+
+                # rows: find tr elements and check first td classes + tr class attr empty
+                rows = table.find_all('tr')
+                for tr in rows:
+                    # Accept rows where tr.class is empty OR class attribute is missing
+                    has_class_attr = 'class' in tr.attrs
+                    class_attr_empty = False
+                    if has_class_attr:
+                        # bs4 represents class as list; consider empty list or list of empty string as empty
+                        val = tr.attrs.get('class')
+                        if val is None or val == [] or (isinstance(val, list) and len(val) == 1 and val[0] == ''):
+                            class_attr_empty = True
+                    else:
+                        # no class attribute -> treat as acceptable (same as empty)
+                        class_attr_empty = True
+                    # find first td and check classes
+                    first_td = tr.find('td')
+                    if not first_td:
+                        continue
+                    td_classes = first_td.attrs.get('class') or []
+                    if not (('value' in td_classes) and ('index' in td_classes)):
+                        continue
+                    if not class_attr_empty:
+                        continue
+
+                    # Determine FTL column index via header, fallback to index 3
+                    header_ths = table.find_all('thead th') if table.find('thead') else []
+                    ftl_idx = None
+                    for idx, h in enumerate(header_ths):
+                        txt = (h.get_text() or '').lower().replace('.', '').strip()
+                        if txt == 'ftl':
+                            ftl_idx = idx
+                            break
+
+                    tds = tr.find_all('td')
+                    if ftl_idx is not None and ftl_idx < len(tds):
+                        ftl_text = (tds[ftl_idx].get_text() or '').strip()
+                    else:
+                        ftl_text = (tds[3].get_text() if len(tds) > 3 else '') or ''
+
+                    nr_text = (first_td.get_text() or '').strip()
+                    # Allow injection even if FTL cell is empty (we'll use NR as key in that case)
+                    if not nr_text:
+                        continue
+                    if not ftl_text:
+                        logger.debug("inject_rfid: empty FTL for row nr=%s, injecting with NR-only key", nr_text)
+
+                    key = f"{nr_text} {ftl_text}".strip()
+                    # Avoid duplicating RFID cell if already present at index 2
+                    existing_cells = tr.find_all('td')
+                    already = False
+                    if len(existing_cells) > 2 and (existing_cells[2].get_text() or '').strip() in ['✔', '✖', '–']:
+                        already = True
+                    if already:
+                        logger.debug("inject_rfid: row %s already has rfid cell", key)
+                        continue
+
+                    # create new td with placeholder
+                    new_td = soup.new_tag('td')
+                    new_td.string = '–'
+                    new_td['title'] = f'Kein RFID zugeordnet | Key={key}'
+                    new_td['data-format-key'] = key
+                    new_td['style'] = 'padding:6px 8px;border:1px solid #000000;font-weight:700;color:#666'
+
+                    if len(existing_cells) > 2:
+                        existing_cells[2].insert_before(new_td)
+                    else:
+                        tr.append(new_td)
+                    injected_any = True
+                    logger.debug("inject_rfid: injected td for key=%s", key)
+
+            # inject meta marker and small JS if something was injected
+            if injected_any:
+                logger.info("inject_rfid: injected_any=true, adding script tag and meta")
+                head = soup.find('head')
+                if not head:
+                    head = soup.new_tag('head')
+                    if soup.html:
+                        soup.html.insert(0, head)
+                    else:
+                        soup.insert(0, head)
+                meta = soup.new_tag('meta')
+                meta['name'] = 'somic-rfid-injected'
+                meta['content'] = '1'
+                head.append(meta)
+
+                # Reference external JS file served from /static
+                script_tag = soup.new_tag('script', src='/static/somic-rfid.js')
+                if soup.body:
+                    soup.body.append(script_tag)
+                else:
+                    soup.append(script_tag)
+
+            return str(soup)
+
+        # apply injection
+        injected_html = inject_rfid_column_and_ws(html_text)
+
         # Save to cache file
-        with open(HTML_CACHE_PATH, "wb") as f:
-            f.write(content)
-        
-        # Return the content as HTML
-        return HTMLResponse(content=content.decode("utf-8"))
+        with open(HTML_CACHE_PATH, "w", encoding="utf-8") as f:
+            f.write(injected_html)
+
+        # Return the injected content as HTML
+        return HTMLResponse(content=injected_html)
     except Exception as e:
         logger.error(f"Error uploading HTML file: {e}")
         raise HTTPException(status_code=500, detail="Error processing uploaded file")
@@ -1154,6 +1322,10 @@ def _mount_pictures_static() -> None:
             return
     try:
         app.mount("/pictures", StaticFiles(directory=str(PICTURES_DIR)), name="pictures")
+        # Serve small static helpers (e.g. somic-rfid.js)
+        static_dir = Path(__file__).parent / 'static'
+        if static_dir.exists():
+            app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
         _pictures_static_mounted = True
         logger.info("Mounted /pictures static directory: %s", PICTURES_DIR)
     except Exception as e:  # noqa: BLE001

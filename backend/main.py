@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -635,7 +635,7 @@ async def verify_password(request: PasswordRequest):
         return PasswordResponse(success=False, message="Falsches Passwort!")
 
 @app.get("/api/customer-html")
-async def get_customer_html(original: bool = False):
+async def get_customer_html(request: Request, original: bool = False):
     """Get cached customer HTML"""
     try:
         # When explicitly requested, return the original (non-injected) HTML if it exists
@@ -645,6 +645,44 @@ async def get_customer_html(original: bool = False):
             return HTMLResponse(content=content)
         # Default: return the injected HTML cache (backward compatible behavior)
         if HTML_CACHE_PATH.exists():
+            # Refresh inline script and backend-origin meta on every GET so clients receive latest logic
+            try:
+                raw = HTML_CACHE_PATH.read_text(encoding="utf-8", errors="ignore")
+                soup = BeautifulSoup(raw, "lxml")
+            except Exception:
+                try:
+                    raw = HTML_CACHE_PATH.read_text(encoding="utf-8", errors="ignore")
+                    soup = BeautifulSoup(raw, "html.parser")
+                except Exception:
+                    soup = None
+            if soup is not None:
+                # Update somic-backend-origin meta to match request origin (respect X-Forwarded-Proto)
+                try:
+                    xf_proto = request.headers.get("x-forwarded-proto")
+                    scheme = (xf_proto or request.url.scheme or "http").split(",")[0].strip()
+                    host = request.headers.get("host") or request.url.netloc
+                    if host:
+                        desired_origin = f"{scheme}://{host}"
+                        meta_origin = soup.find("meta", attrs={"name": "somic-backend-origin"})
+                        if not meta_origin:
+                            meta_origin = soup.new_tag('meta')
+                            meta_origin['name'] = 'somic-backend-origin'
+                            if soup.head:
+                                soup.head.append(meta_origin)
+                        meta_origin['content'] = desired_origin
+                except Exception:
+                    pass
+                # Replace inline client script with latest file content
+                try:
+                    script_tag = soup.find('script', attrs={'id': 'somic-rfid-inline'})
+                    static_path = Path(__file__).parent / 'static' / 'somic-rfid.js'
+                    if script_tag and static_path.exists():
+                        script_code = static_path.read_text(encoding='utf-8', errors='ignore')
+                        script_tag.string = script_code
+                except Exception:
+                    pass
+                return HTMLResponse(content=str(soup))
+            # Fallback: return as-is
             with open(HTML_CACHE_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
             return HTMLResponse(content=content)

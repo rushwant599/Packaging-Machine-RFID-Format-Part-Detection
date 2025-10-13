@@ -358,28 +358,46 @@
   function backendOrigins(){
     var list = [];
     try{
-      // 1) Same origin (best if reverse proxy is configured)
-      if(location && location.origin && /^https?:/.test(location.protocol)){
-        list.push(location.origin);
-      }
-      // 2) Same IP/hostname with backend port (default 8001)
-      if(location && location.hostname){
-        var proto = location.protocol || 'http:';
-        var port = DEFAULT_BACKEND_PORT;
-        list.push(proto + '//' + location.hostname + ':' + port);
-      }
-      // 3) Optional meta override (lowest priority)
+      // Determine page context (handles blob: documents)
+      var ref = (typeof document !== 'undefined' && document.referrer) ? document.referrer : '';
+      var refUrl = null;
+      try{ if(ref) refUrl = new URL(ref); }catch(e){}
+      var locProto = (typeof location !== 'undefined' ? location.protocol : '');
+      var isHttpLike = /^https?:$/.test(locProto);
+      var isHttps = (locProto === 'https:') || (refUrl && refUrl.protocol === 'https:');
+
+      // 1) Meta override (explicit)
       var m = document.querySelector('meta[name="somic-backend-origin"]');
       var c = m && m.getAttribute('content');
       if(c){
         try{
-          var u = new URL(c);
-          if(u.hostname && u.hostname !== '0.0.0.0'){
-            var o = u.origin;
-            if(list.indexOf(o) === -1) list.push(o);
+          var mu = new URL(c);
+          if(mu.hostname && mu.hostname !== '0.0.0.0'){
+            if(!(isHttps && mu.protocol === 'http:')){
+              var mo = mu.origin; if(list.indexOf(mo) === -1) list.push(mo);
+            }
           }
         }catch(e){}
       }
+
+      // 2) Referrer origin (parent page that created blob)
+      if(refUrl && /^https?:$/.test(refUrl.protocol)){
+        var ro = refUrl.origin; if(list.indexOf(ro) === -1) list.push(ro);
+      }
+
+      // 3) Same document origin (only if http(s))
+      if(isHttpLike && location.origin){ if(list.indexOf(location.origin) === -1) list.push(location.origin); }
+
+      // 4) Dev fallback to localhost:8001 only when parent or self are localhost
+      try{
+        var host = (refUrl && refUrl.hostname) || (location && location.hostname) || '';
+        var isLocal = (host === 'localhost' || host === '127.0.0.1' || host === '::1');
+        if(isLocal){
+          var useProto = isHttps ? 'https:' : ((locProto && /^https?:$/.test(locProto)) ? locProto : 'http:');
+          var devOrigin = useProto + '//' + (host || 'localhost') + ':' + DEFAULT_BACKEND_PORT;
+          if(list.indexOf(devOrigin) === -1) list.push(devOrigin);
+        }
+      }catch(e){}
     }catch(e){}
     return list;
   }
@@ -393,7 +411,13 @@
       var origin = origins[idx++];
       var u;
       try{ u = new URL(origin); }catch(e){ return tryNext(); }
-      var proto = (u.protocol==='https:') ? 'wss' : 'ws';
+      // Force wss when page/referrer is https to avoid mixed content
+      var pageHttps = false;
+      try{
+        if(location && location.protocol === 'https:') pageHttps = true;
+        else if(document && document.referrer){ var r = new URL(document.referrer); if(r.protocol==='https:') pageHttps = true; }
+      }catch(e){}
+      var proto = pageHttps ? 'wss' : ((u.protocol==='https:') ? 'wss' : 'ws');
       var wsUrl = proto + '://' + u.host + '/ws/opc-ua';
       var ws;
       try{ ws = new WebSocket(wsUrl); }catch(e){ return tryNext(); }
@@ -421,15 +445,20 @@
   function apiFetch(path){
     var origins = backendOrigins();
     var i = 0;
+    var triedRelative = false;
     function attempt(){
+      // Try same-origin relative first (works when behind reverse proxy on https)
+      if(!triedRelative){
+        triedRelative = true;
+        try{
+          return fetch(path).then(function(r){ if(r && r.ok) return r; return attempt(); }).catch(function(){ return attempt(); });
+        }catch(e){ /* fallthrough */ }
+      }
       if(i >= origins.length){ return Promise.reject(new Error('No backend origins reachable')); }
       var origin = origins[i++];
       var url = origin.replace(/\/$/,'') + path;
       try{
-        return fetch(url).then(function(r){
-          if(r && r.ok) return r;
-          return attempt();
-        }).catch(function(){ return attempt(); });
+        return fetch(url).then(function(r){ if(r && r.ok) return r; return attempt(); }).catch(function(){ return attempt(); });
       }catch(e){ return attempt(); }
     }
     return attempt();

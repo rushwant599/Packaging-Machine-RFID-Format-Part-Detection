@@ -131,6 +131,26 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 
 ---
 
+## Antenna Configuration
+
+- Ausgabeformat (RFID Tag Data):
+
+![Ausgabeformat](graphs/image1.png)
+
+- OPC UA Settings:
+
+![OpcUA Settings](graphs/image2.png)
+
+Don't forget to turn on the OPC UA server in your RFID reader!
+
+- Objekttrigger (Object Trigger) settings:
+
+![Objekttrigger](graphs/image3.png)
+
+- Export PDF:
+
+[Export PDF](graphs/RFU630E.pdf)
+
 ## License
 
 (c) Somic Verwaltungs GmbH, 2025. Proprietary. For internal use and customer projects only.

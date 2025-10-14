@@ -243,6 +243,49 @@
     }catch(e){ return 0; }
   }
 
+  // Return array of wrong details: [{ keys: [formatPart...], tagRaw: string|null, tagNorm: string }]
+  function computeWrongDetails(){
+    var details = [];
+    try{
+      // Expected tags from current map
+      var expected = new Set();
+      map.forEach(function(td){
+        var tag = resolveAssignmentForTd(td);
+        var norm = tag ? normalizeTag(tag) : null;
+        if(norm) expected.add(norm);
+      });
+      // Reverse map: tagNorm -> [formatKey]
+      var rev = {};
+      try{
+        Object.keys(assignments||{}).forEach(function(k){
+          var v = assignments[k];
+          var raw = null;
+          if(typeof v === 'string') raw = v; else if(v && typeof v === 'object') raw = v.rfid_tag_id || v.rfidTagId || v.tagId || null;
+          var n = raw ? normalizeTag(raw) : null;
+          if(n){ if(!rev[n]) rev[n] = []; if(rev[n].indexOf(k)===-1) rev[n].push(k); }
+        });
+      }catch(e){}
+      // Build details for live tags not in expected
+      if(liveSet && typeof liveSet.forEach === 'function'){
+        liveSet.forEach(function(t){
+          if(!expected.has(t)){
+            var keys = rev[t] || [];
+            var raw = null;
+            if(keys.length){
+              // Find first raw by scanning assignments for this norm
+              for(var i=0;i<keys.length && !raw;i++){
+                var kv = assignments[keys[i]];
+                if(typeof kv === 'string') raw = kv; else if(kv && typeof kv==='object') raw = kv.rfid_tag_id || kv.rfidTagId || kv.tagId || null;
+              }
+            }
+            details.push({ keys: keys, tagRaw: raw, tagNorm: t });
+          }
+        });
+      }
+    }catch(e){}
+    return details;
+  }
+
   function updateLegend(){
     var el = ensureLegend();
     if(!el) return;
@@ -259,7 +302,23 @@
       dot.title = 'WebSocket: ' + wsState;
     }
     if(live){ live.textContent = '(Live: ' + (liveSet ? liveSet.size : 0) + ')'; }
-    if(wrong){ wrong.textContent = '(Falsch: ' + computeWrongCount() + ')'; }
+    if(wrong){
+      var wdetails = computeWrongDetails();
+      wrong.textContent = '(Falsch: ' + (wdetails ? wdetails.length : 0) + ')';
+      // Build tooltip lines "<formatKey or (unbekannt)> • …<last6>"
+      try{
+        var lines = [];
+        for(var i=0;i<Math.min(wdetails.length, 30); i++){
+          var d = wdetails[i];
+          var keyLabel = (d.keys && d.keys.length) ? d.keys.join(', ') : '(unbekannt)';
+          var raw = d.tagRaw || d.tagNorm || '';
+          var last6 = raw ? raw.toString().slice(-6) : '';
+          lines.push(keyLabel + ' • …' + last6);
+        }
+        if(wdetails.length > 30) lines.push('…');
+        wrong.title = lines.length ? ('Falsche Tags:\n' + lines.join('\n')) : 'Keine falschen Tags';
+      }catch(e){ wrong.title = 'Falsche Tags (Tooltip Fehler)'; }
+    }
   }
 
   // Resolve assignment for a given TD by trying multiple key variants (exact, normalized, FTL-only)

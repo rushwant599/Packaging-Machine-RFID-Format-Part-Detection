@@ -45,12 +45,18 @@
             // No RFID cell yet -> create one and insert before the 3rd column (index 2) if present
             target = document.createElement('td');
             target.textContent='–';
-            target.style.padding='6px 8px';
-            target.style.border='1px solid #c5c5c5';
-            target.style.fontWeight='700';
-            target.style.color='#666';
             if(tds[2]) tds[2].parentNode.insertBefore(target, tds[2]); else tr.appendChild(target);
           }
+          // Normalize styling: centered content, zero top/bottom padding
+          try{
+            target.style.padding = '0 8px';
+            target.style.textAlign = 'center';
+            target.style.verticalAlign = 'middle';
+            target.style.border = target.style.border || '1px solid #000000';
+            target.style.fontWeight = '700';
+            target.style.color = target.style.color || '#666';
+            target.style.whiteSpace = 'nowrap';
+          }catch(e){}
           target.setAttribute('data-format-key', key);
           target.setAttribute('data-nr', nr);
           if(ftl) target.setAttribute('data-ftl', ftl); else target.removeAttribute('data-ftl');

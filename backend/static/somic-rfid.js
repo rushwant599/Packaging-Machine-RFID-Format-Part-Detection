@@ -210,10 +210,16 @@
   wrong.style.opacity = '0.8';
   wrong.textContent = '(Falsch: 0)';
 
+  var fmtStats = document.createElement('span');
+  fmtStats.setAttribute('id','somic-rfid-formatstats');
+  fmtStats.style.opacity = '0.9';
+  fmtStats.textContent = 'Format: –';
+
     el.appendChild(dot);
     el.appendChild(txt);
     el.appendChild(live);
   el.appendChild(wrong);
+  el.appendChild(fmtStats);
 
     if(table && table.parentNode){
       table.parentNode.insertBefore(el, table);
@@ -286,12 +292,75 @@
     return details;
   }
 
+  // Resolve assignment from NR+FTL against global assignments map
+  function resolveAssignmentByNrFtl(nr, ftl){
+    try{
+      var candidates = [];
+      if(nr && ftl){
+        var k = nr + ' ' + ftl;
+        candidates.push(k);
+        candidates.push(k.replace(/\s+/g,' ').trim());
+        candidates.push(k.replace(/\./g,'').replace(/\s+/g,' ').trim());
+        candidates.push(nr + ' ' + (ftl.replace(/\./g,'')));
+      }
+      if(ftl){
+        candidates.push(ftl);
+        candidates.push(ftl.replace(/\./g,''));
+        candidates.push(ftl.replace(/\s+/g,''));
+      }
+      var seenC = new Set(); var final = [];
+      for(var i=0;i<candidates.length;i++){ var c=candidates[i]; if(c && !seenC.has(c)){ seenC.add(c); final.push(c);} }
+      for(var j=0;j<final.length;j++){
+        var key = final[j];
+        var assign = assignments[key];
+        if(assign){
+          if(typeof assign === 'string') return assign;
+          if(assign && typeof assign === 'object'){
+            var maybe = assign.rfid_tag_id || assign.rfidTagId || assign.tagId || null;
+            if(maybe) return maybe;
+          }
+        }
+      }
+    }catch(e){}
+    return null;
+  }
+
+  // Compute per-format stats: recognized vs missing among assigned tags for that format
+  function computeFormatStats(){
+    var out = { current: { name: currentFormat||'', recognized: 0, total: 0, missing: 0 }, all: [] };
+    try{
+      var names = (formatMaps && Array.isArray(formatMaps.names)) ? formatMaps.names : [];
+      for(var n=0;n<names.length;n++){
+        var name = names[n];
+        var nrMap = (formatMaps.byFormat && formatMaps.byFormat[name]) || {};
+        var total = 0, recognized = 0;
+        for(var nr in nrMap){ if(Object.prototype.hasOwnProperty.call(nrMap,nr)){
+          var ftl = nrMap[nr];
+          var raw = resolveAssignmentByNrFtl(nr, ftl);
+          if(raw){
+            total += 1;
+            var norm = normalizeTag(raw);
+            if(norm && liveSet && liveSet.has(norm)) recognized += 1;
+          }
+        }}
+        var missing = Math.max(0, total - recognized);
+        var rec = { name: name, recognized: recognized, total: total, missing: missing };
+        out.all.push(rec);
+        if(name === currentFormat){ out.current = rec; }
+      }
+      // If current format not found, but we have at least one, set first as current for display
+      if(!out.current || !out.current.name){ if(out.all.length){ out.current = out.all[0]; } }
+    }catch(e){}
+    return out;
+  }
+
   function updateLegend(){
     var el = ensureLegend();
     if(!el) return;
     var dot = el.querySelector('#somic-rfid-ws-dot');
     var live = el.querySelector('#somic-rfid-livecount');
-    var wrong = el.querySelector('#somic-rfid-wrongcount');
+  var wrong = el.querySelector('#somic-rfid-wrongcount');
+  var fmtStats = el.querySelector('#somic-rfid-formatstats');
     if(dot){
       var color = '#f0ad4e'; // default/connecting
       if(wsState==='connected') color = '#2eb85c';
@@ -318,6 +387,21 @@
         if(wdetails.length > 30) lines.push('…');
         wrong.title = lines.length ? ('Falsche Tags:\n' + lines.join('\n')) : 'Keine falschen Tags';
       }catch(e){ wrong.title = 'Falsche Tags (Tooltip Fehler)'; }
+    }
+    if(fmtStats){
+      var stats = computeFormatStats();
+      var c = stats.current || { recognized:0, total:0, missing:0, name:'' };
+      fmtStats.textContent = 'Format: ' + c.recognized + '/' + c.total + ' erkannt · ' + c.missing + '/' + c.total + ' fehlen';
+      // Tooltip: per-format breakdown
+      try{
+        var lines2 = [];
+        for(var k=0;k<Math.min(stats.all.length, 40); k++){
+          var r = stats.all[k];
+          lines2.push(r.name + ': ' + r.recognized + '/' + r.total + ' erkannt · ' + r.missing + '/' + r.total + ' fehlen');
+        }
+        if(stats.all.length > 40) lines2.push('…');
+        fmtStats.title = lines2.length ? ('Pro Format:\n' + lines2.join('\n')) : 'Keine Zuordnungen';
+      }catch(e){ fmtStats.title = ''; }
     }
   }
 

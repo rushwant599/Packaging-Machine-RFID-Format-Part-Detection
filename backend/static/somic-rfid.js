@@ -205,9 +205,15 @@
     live.style.opacity = '0.8';
     live.textContent = '(Live: 0)';
 
+  var wrong = document.createElement('span');
+  wrong.setAttribute('id','somic-rfid-wrongcount');
+  wrong.style.opacity = '0.8';
+  wrong.textContent = '(Falsch: 0)';
+
     el.appendChild(dot);
     el.appendChild(txt);
     el.appendChild(live);
+  el.appendChild(wrong);
 
     if(table && table.parentNode){
       table.parentNode.insertBefore(el, table);
@@ -219,11 +225,30 @@
     return el;
   }
 
+  // Compute number of tags that are currently seen but not part of the active format rows
+  function computeWrongCount(){
+    try{
+      // Build expected set from current table mapping using current assignments
+      var expected = new Set();
+      map.forEach(function(td){
+        var tag = resolveAssignmentForTd(td);
+        var norm = tag ? normalizeTag(tag) : null;
+        if(norm) expected.add(norm);
+      });
+      var wrong = 0;
+      if(liveSet && typeof liveSet.forEach === 'function'){
+        liveSet.forEach(function(t){ if(!expected.has(t)) wrong++; });
+      }
+      return wrong;
+    }catch(e){ return 0; }
+  }
+
   function updateLegend(){
     var el = ensureLegend();
     if(!el) return;
     var dot = el.querySelector('#somic-rfid-ws-dot');
     var live = el.querySelector('#somic-rfid-livecount');
+    var wrong = el.querySelector('#somic-rfid-wrongcount');
     if(dot){
       var color = '#f0ad4e'; // default/connecting
       if(wsState==='connected') color = '#2eb85c';
@@ -234,6 +259,7 @@
       dot.title = 'WebSocket: ' + wsState;
     }
     if(live){ live.textContent = '(Live: ' + (liveSet ? liveSet.size : 0) + ')'; }
+    if(wrong){ wrong.textContent = '(Falsch: ' + computeWrongCount() + ')'; }
   }
 
   // Resolve assignment for a given TD by trying multiple key variants (exact, normalized, FTL-only)

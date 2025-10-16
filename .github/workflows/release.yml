@@ -53,7 +53,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.METTEAGLE_GHCR_TOKEN }}
+          password: ${{ secrets.LYNX_GHCR_TOKEN }}
       - id: lower-case
         uses: ASzc/change-string-case-action@v6
         with:
@@ -67,6 +67,8 @@ jobs:
               type=ref,event=tag
               type=semver,pattern={{version}}
               type=sha
+              type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+              type=raw,value=${{ github.event.release.tag_name }},enable=${{ github.event.release.tag_name != '' }}
       - name: Build and push Docker image
         id: push
         uses: docker/build-push-action@v5
@@ -85,8 +87,8 @@ jobs:
       - name: Release to Flecs
         uses: softprops/action-gh-release@v2
         with:
-          repository: FLECS-Technologies/apps-com.somic-packaging.metteagle
+          repository: FLECS-Technologies/apps-com.somic-packaging.lynx
           tag_name: ${{ github.event.release.tag_name || inputs.version || github.ref_name }}
           body: ${{ github.event.release.body }}
-          token: ${{ secrets.METTEAGLE_FLECS_APP_RELEASE_TOKEN }}
+          token: ${{ secrets.LYNX_FLECS_APP_RELEASE_TOKEN }}
           make_latest: true

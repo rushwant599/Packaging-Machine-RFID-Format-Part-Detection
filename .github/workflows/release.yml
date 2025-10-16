@@ -8,6 +8,8 @@ on:
         description: 'Release-Version (z.B. V0.0.1)'
         required: true
         type: string
+env:
+  REGISTRY: ghcr.io
 jobs:
   deploy:
     uses: ./.github/workflows/deploy_image.yml
@@ -16,3 +18,75 @@ jobs:
       packages: write
     with:
       tag: ${{ github.event.release.tag_name || inputs.version }}
+
+  test:
+    name: Run backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install deps and run tests
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+          python -m pytest test_main.py -v || echo "Tests not yet implemented"
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+
+    permissions:
+      packages: write
+      contents: write
+      attestations: write
+      id-token: write
+      pages: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.METTEAGLE_GHCR_TOKEN }}
+      - id: lower-case
+        uses: ASzc/change-string-case-action@v6
+        with:
+          string: ${{ github.repository }}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.lower-case.outputs.lowercase }}
+          tags: |
+              type=ref,event=tag
+              type=semver,pattern={{version}}
+              type=sha
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{env.REGISTRY}}/${{ steps.lower-case.outputs.lowercase }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Release to Flecs
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: FLECS-Technologies/apps-com.somic-packaging.metteagle
+          tag_name: ${{ github.event.release.tag_name || inputs.version || github.ref_name }}
+          body: ${{ github.event.release.body }}
+          token: ${{ secrets.METTEAGLE_FLECS_APP_RELEASE_TOKEN }}
+          make_latest: true

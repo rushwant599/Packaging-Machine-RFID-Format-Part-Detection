@@ -3,19 +3,18 @@ on:
   push:
     branches: [main, develop]
     tags: ['*']
-  workflow_dispatch:
+  workflow_dispatch:  # manueller Start in Actions-UI
     inputs:
       tag:
-        description: 'Optional image tag to push (e.g. V0.1.1). If provided, this exact tag will be pushed to GHCR.'
-        required: false
-        default: ''
-  workflow_call:
-    inputs:
-      tag:
-        description: 'Optional image tag to push (e.g. V0.1.1). When called as a reusable workflow, provide this input.'
+        description: 'Optional: expliziter Image-Tag (z.B. V0.0.1). Wenn leer, wird aus Ref erzeugt.'
         required: false
         type: string
-        default: ''
+  workflow_call:      # Wiederverwendbarer Workflow
+    inputs:
+      tag:
+        description: 'Optionaler Image-Tag (z.B. V0.0.1). Wenn leer, wird aus Ref erzeugt.'
+        required: false
+        type: string
 
 jobs:
   deploy:
@@ -42,8 +41,23 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64,linux/arm64
-      
-      - name: Extract metadata (used when no manual tag provided)
+
+      # Fall A: Expliziter Tag per Input (workflow_call oder workflow_dispatch)
+      - name: Build and push Docker image (explicit tag)
+        if: ${{ inputs.tag }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fall B: Kein Input-Tag -> Tags aus Git-Ref (Branch/Tag) ableiten
+      - name: Extract metadata
+        if: ${{ !inputs.tag }}
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -53,34 +67,15 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Determine tags to push
-        id: determine_tags
-        run: |
-          # Prefer tag from workflow_call inputs ("inputs.tag"), then workflow_dispatch (github.event.inputs.tag)
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG=""
-          fi
-
-          TAG=$(echo "$TAG" | tr -d '\r' | tr -d '\n' | xargs || true)
-
-          if [ -n "$TAG" ]; then
-            echo "tags=ghcr.io/${{ steps.namespace.outputs.output }}:${TAG}" >> $GITHUB_OUTPUT
-          else
-            echo "tags=${{ steps.meta.outputs.tags }}" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Build and push Docker image
+      - name: Build and push Docker image (from ref)
+        if: ${{ !inputs.tag }}
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.determine_tags.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

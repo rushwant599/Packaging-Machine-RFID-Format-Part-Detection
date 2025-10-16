@@ -1,20 +1,18 @@
-name: release.yml
+name: release
 on:
   release:
     types: [ published ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release-Version (z.B. V0.0.1)'
+        required: true
+        type: string
 jobs:
-  build:
-    uses: ./.github/workflows/build_image.yml
-    with:
-      tag: ${{ github.event.release.tag_name }}
-      build_type: 'release'
   deploy:
-    needs: [ build ]
     uses: ./.github/workflows/deploy_image.yml
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
     with:
-      tag: ${{ github.event.release.tag_name }}
+      tag: ${{ github.event.release.tag_name || inputs.version }}

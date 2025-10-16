@@ -3,7 +3,19 @@ on:
   push:
     branches: [main, develop]
     tags: ['*']
-  workflow_dispatch:  # Für manuellen Test
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional image tag to push (e.g. V0.1.1). If provided, this exact tag will be pushed to GHCR.'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Optional image tag to push (e.g. V0.1.1). When called as a reusable workflow, provide this input.'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   deploy:
@@ -31,7 +43,7 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm64
       
-      - name: Extract metadata
+      - name: Extract metadata (used when no manual tag provided)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -40,6 +52,26 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Determine tags to push
+        id: determine_tags
+        run: |
+          # Prefer tag from workflow_call inputs ("inputs.tag"), then workflow_dispatch (github.event.inputs.tag)
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG=""
+          fi
+
+          TAG=$(echo "$TAG" | tr -d '\r' | tr -d '\n' | xargs || true)
+
+          if [ -n "$TAG" ]; then
+            echo "tags=ghcr.io/${{ steps.namespace.outputs.output }}:${TAG}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${{ steps.meta.outputs.tags }}" >> $GITHUB_OUTPUT
+          fi
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -48,7 +80,7 @@ jobs:
           file: ./dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.determine_tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

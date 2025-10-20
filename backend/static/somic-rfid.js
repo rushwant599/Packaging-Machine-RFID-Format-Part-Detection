@@ -465,6 +465,22 @@
       var kinfo = td.getAttribute('data-format-key') || '';
       td.title = !tag ? ('Kein RFID zugeordnet | Key=' + kinfo) : (seen ? ('Tag ' + tag + ' erkannt | Key=' + kinfo + ' | Norm=' + norm) : ('Tag ' + tag + ' nicht erkannt | Key=' + kinfo + ' | Norm=' + norm));
       td.style.color = tag ? (seen ? '#0a7a15' : '#b30000') : '#666';
+      // Apply background color based on state
+      try{
+        if(!tag){
+          // Neutral state
+          td.style.backgroundColor = '#ffffff';
+          td.style.borderColor = '#000000';
+        } else if(seen){
+          // Green for recognized
+          td.style.backgroundColor = '#99e47cff';
+          td.style.borderColor = '#000000';
+        } else {
+          // Red for not recognized
+          td.style.backgroundColor = '#ec7e7eff';
+          td.style.borderColor = '#000000';
+        }
+      }catch(e){}
     });
     updateLegend();
   }

@@ -20,6 +20,7 @@ http {
 
     server {
         listen              443 ssl http2;
+        listen              80;
         server_name         ${SERVER_IP:-_};
 
         ssl_certificate     ${NGINX_SSL_CERT};

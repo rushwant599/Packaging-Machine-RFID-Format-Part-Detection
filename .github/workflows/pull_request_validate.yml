@@ -14,20 +14,20 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run lint
-#  backend-lint:
-#    name: Lint backend with flake8
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-python@v5
-#        with:
-#          python-version: '3.13'
-#          cache: 'pip'
-#      - run: |
-#          cd backend
-#          pip install -r requirements.txt
-#          pip install flake8 black
-#          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+  backend-lint:
+    name: Lint backend with flake8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install flake8 black
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
   build-frontend:
     name: Build Next.js frontend
     runs-on: ubuntu-latest
@@ -39,20 +39,20 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run build
-#  test:
-#    name: Run backend tests
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-python@v5
-#        with:
-#          python-version: '3.13'
-#          cache: 'pip'
-#      - run: |
-#          cd backend
-#          pip install -r requirements.txt
-#          pip install pytest pytest-asyncio
-#          python -m pytest test_main.py -v || echo "Tests not yet implemented"
+  test:
+    name: Run backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+          python -m pytest test_main.py -v || echo "Tests not yet implemented"
   build:
     name: Build Docker image
     runs-on: ubuntu-latest

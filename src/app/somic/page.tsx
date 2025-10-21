@@ -45,17 +45,12 @@ const backendUrl = ((): string => {
   if (typeof window !== 'undefined') {
     try {
       const { protocol, host } = window.location; // host includes port when present
-      const hostnameOnly = host.split(':')[0];
-      const port = host.includes(':') ? host.split(':')[1] : '';
-      // If served via HTTPS or via a host with a mapped port (not dev :3000), use same-origin so nginx proxies /api/
-      if (protocol === 'https:' || (port && port !== '3000')) {
+      const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
+      if (protocol === 'https:' || isStandard) {
         return `${protocol}//${host}`;
       }
-      // Dev case: frontend on :3000 -> assume backend on :8001
-      if (port === '3000') {
-        const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
-        return `${protocol}//${hostnameOnly}:${p}`;
-      }
+      const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+      return `${protocol}//${host.split(':')[0]}:${p}`;
     } catch {
       // fallback
     }

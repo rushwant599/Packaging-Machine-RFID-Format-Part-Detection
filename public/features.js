@@ -6,20 +6,13 @@ let assignments = {}; // Format part -> RFID tag assignments from database
 const API_BASE_URL = (() => {
   try {
     const { protocol, host } = window.location; // host includes port when present
-    // If the page is served via HTTPS, or the host already contains a port (mapped by a reverse proxy),
-    // use same-origin so requests go to the proxy and are forwarded to the backend.
-    // Special-case dev on :3000 -> assume backend on :8001.
-    const hostnameOnly = host.split(':')[0];
-    const port = host.includes(':') ? host.split(':')[1] : '';
-    if (protocol === 'https:' || (port && port !== '3000')) {
-      return `${protocol}//${host}`; // use same-origin (preserves mapped ports like :4444)
+    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
+    if (protocol === 'https:' || isStandard) {
+      return `${protocol}//${host}`; // nginx reverse proxy - host preserves port like :4400
     }
     // dev: frontend likely on :3000 and backend on :8001 -> use hostname part and backend port
-    if (port === '3000') {
-      return `${protocol}//${hostnameOnly}:8001`;
-    }
-    // Default to same-origin to avoid accidentally calling :8001 for proxied deployments
-    return `${protocol}//${host}`;
+    const hostnameOnly = host.split(':')[0];
+    return `${protocol}//${hostnameOnly}:8001`;
   } catch (e) {
     return 'http://localhost:8001';
   }

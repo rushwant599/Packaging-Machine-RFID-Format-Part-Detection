@@ -23,7 +23,9 @@ DEFAULT_CONFIG = {
     "RFID_READER_PORT": 2111,
     "RFID_READER_ANT": "F",
     "RFID_CURRENT_RETENTION_SEC": 10,
-    "RFID_INVENTORY_INTERVAL_SEC": 1
+    "RFID_INVENTORY_INTERVAL_SEC": 1,
+    # Theme color for UI
+    "THEME_COLOR": "#1976d2"
 }
 
 def _cast_env_value(key: str, value: str) -> Any:
@@ -72,6 +74,7 @@ def _build_env_map() -> Dict[str, Any]:
         "RFID_READER_ANT": os.environ.get("RFID_READER_ANT"),
         "RFID_CURRENT_RETENTION_SEC": os.environ.get("RFID_CURRENT_RETENTION_SEC"),
         "RFID_INVENTORY_INTERVAL_SEC": os.environ.get("RFID_INVENTORY_INTERVAL_SEC"),
+        "THEME_COLOR": os.environ.get("THEME_COLOR"),
     }
 
 def _apply_env_overrides(config: Dict[str, Any], env_map: Dict[str, Any]) -> None:
@@ -81,6 +84,11 @@ def _apply_env_overrides(config: Dict[str, Any], env_map: Dict[str, Any]) -> Non
 
 def _write_config(path: str, config: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Log where we write the config for easier debugging in local development
+    try:
+        print(f"[config_manager] Writing config to: {path}")
+    except Exception:
+        pass
     with open(path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 

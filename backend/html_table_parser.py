@@ -33,6 +33,29 @@ class MainTableRowExtractor:
 
     def __init__(self, html_file_path: str | Path):
         self.html_file_path = Path(html_file_path)
+        # Prefer the original (uninjected) cache if the typical injected filename is provided
+        self._preferred_path = self._resolve_preferred_path(self.html_file_path)
+
+    def _resolve_preferred_path(self, path: Path) -> Path:
+        """If the given path points to the injected cache, use the original sibling when available.
+
+        This keeps existing callers backward compatible while ensuring data extraction works on
+        the raw, non-injected HTML. If no original exists, fall back to the provided path.
+        """
+        try:
+            # Common filenames in this project
+            injected_names = {
+                "customer-html-cache.html",
+                "customer-html-cache.injected.html",
+            }
+            if path.name in injected_names:
+                original = path.with_name("customer-html-cache.original.html")
+                if original.exists():
+                    return original
+        except Exception:
+            # On any issue, just use the provided path
+            pass
+        return path
 
     # Public API -----------------------------------------------------
     def extract_rows(self, *, as_html: bool = True, strip_whitespace: bool = False,
@@ -106,9 +129,10 @@ class MainTableRowExtractor:
 
     # Internal helpers -----------------------------------------------
     def _load_soup(self) -> BeautifulSoup:
-        if not self.html_file_path.exists():
-            raise FileNotFoundError(f"HTML cache file not found: {self.html_file_path}")
-        content = self.html_file_path.read_text(encoding="utf-8", errors="ignore")
+        path = getattr(self, "_preferred_path", self.html_file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"HTML cache file not found: {path}")
+        content = path.read_text(encoding="utf-8", errors="ignore")
         return BeautifulSoup(content, "html.parser")
 
 

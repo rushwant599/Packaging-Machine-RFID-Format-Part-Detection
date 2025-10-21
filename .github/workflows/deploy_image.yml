@@ -3,7 +3,18 @@ on:
   push:
     branches: [main, develop]
     tags: ['*']
-  workflow_dispatch:  # Für manuellen Test
+  workflow_dispatch:  # manueller Start in Actions-UI
+    inputs:
+      tag:
+        description: 'Optional: expliziter Image-Tag (z.B. V0.0.1). Wenn leer, wird aus Ref erzeugt.'
+        required: false
+        type: string
+  workflow_call:      # Wiederverwendbarer Workflow
+    inputs:
+      tag:
+        description: 'Optionaler Image-Tag (z.B. V0.0.1). Wenn leer, wird aus Ref erzeugt.'
+        required: false
+        type: string
 
 jobs:
   deploy:
@@ -29,9 +40,24 @@ jobs:
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
-      
+          platforms: linux/amd64
+
+      # Fall A: Expliziter Tag per Input (workflow_call oder workflow_dispatch)
+      - name: Build and push Docker image (explicit tag)
+        if: ${{ inputs.tag }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fall B: Kein Input-Tag -> Tags aus Git-Ref (Branch/Tag) ableiten
       - name: Extract metadata
+        if: ${{ !inputs.tag }}
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -40,13 +66,14 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
-      
-      - name: Build and push Docker image
+
+      - name: Build and push Docker image (from ref)
+        if: ${{ !inputs.tag }}
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -597,6 +597,25 @@
     var origins = backendOrigins();
     var idx = 0;
     var connectedOnce = false;
+
+    // First try same-origin WebSocket (works when page is served through nginx reverse proxy)
+    try{
+      var pageProto = (location && location.protocol === 'https:') ? 'wss' : 'ws';
+      if(location && location.host){
+        var sameOriginWs = pageProto + '://' + location.host + '/ws/opc-ua';
+        try{
+          var ws = new WebSocket(sameOriginWs);
+          ws.onopen = function(){ connectedOnce = true; wsState='connected'; updateLegend(); };
+          ws.onmessage = function(ev){ try{ var msg = JSON.parse(ev.data); if(msg && msg.type==='live_event_ids' && Array.isArray(msg.ids)) handleLiveIds(msg.ids); if(msg && msg.type==='assignments_update' && msg.assignments) handleAssignmentsUpdate(msg.assignments); }catch(e){} };
+          ws.onclose = function(){ if(!connectedOnce) { /* fallthrough to origin list */ } else { wsState='reconnecting'; updateLegend(); setTimeout(connectWs, 2000); } };
+          ws.onerror = function(){ try{ ws.close(); }catch(e){} /* fallthrough to origin list */ };
+          // If open succeeded, return early (we're connected).
+          // Note: if connection fails synchronously, control falls through to origin list.
+          return;
+        }catch(e){ /* ignore and fall back to origin list */ }
+      }
+    }catch(e){}
+
     function tryNext(){
       if(idx >= origins.length){ wsState='error'; updateLegend(); setTimeout(connectWs, 2000); return; }
       var origin = origins[idx++];

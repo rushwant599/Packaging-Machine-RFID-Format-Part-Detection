@@ -488,14 +488,19 @@ export default function CustomerPage() {
     let resolvedBaseHttp = '';
     try {
       let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
-      if (!tmp) {
+      if (!tmp && typeof window !== 'undefined') {
         const { protocol, host } = window.location; // host contains hostname[:port]
-        const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-        if (protocol === 'https:' || isStandard) {
-          tmp = `${protocol}//${host}`; // preserves port when mapped like :4400
-        } else {
+        const hostnameOnly = host.split(':')[0];
+        const port = host.includes(':') ? host.split(':')[1] : '';
+        // If served via HTTPS or served on a mapped port (not dev :3000), prefer same-origin so nginx can proxy /api and /ws
+        if (protocol === 'https:' || (port && port !== '3000')) {
+          tmp = `${protocol}//${host}`;
+        } else if (port === '3000') {
           const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-          tmp = `${protocol}//${host.split(':')[0]}:${p}`;
+          tmp = `${protocol}//${hostnameOnly}:${p}`;
+        } else {
+          // Fallback to same-origin
+          tmp = `${protocol}//${host}`;
         }
       }
       resolvedBaseHttp = tmp;

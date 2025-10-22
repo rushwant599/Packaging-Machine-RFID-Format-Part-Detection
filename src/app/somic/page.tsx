@@ -271,7 +271,7 @@ export default function SomicPage() {
                     </svg>
                     Select File
                   </button>
-                      <input
+                  <input
                     ref={fileInputRef}
                     id="html-upload"
                     type="file"

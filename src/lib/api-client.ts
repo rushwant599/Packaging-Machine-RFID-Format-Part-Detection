@@ -94,7 +94,7 @@ class APIClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
-    
+
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
@@ -107,7 +107,7 @@ class APIClient {
       throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
-  return response.json() as Promise<T>;
+    return response.json() as Promise<T>;
   }
 
   // Health check
@@ -158,7 +158,7 @@ class APIClient {
     return this.request('/api/format-data');
   }
 
-  async getFormatParts(): Promise<{formatParts: string[], count: number, message: string}> {
+  async getFormatParts(): Promise<{ formatParts: string[], count: number, message: string }> {
     return this.request('/api/format-parts');
   }
 
@@ -223,7 +223,7 @@ class APIClient {
     });
   }
 
-  async reconnectOPCUA(): Promise<{success: boolean, message: string, status: string}> {
+  async reconnectOPCUA(): Promise<{ success: boolean, message: string, status: string }> {
     return this.request('/api/opc-ua/reconnect', {
       method: 'POST',
     });

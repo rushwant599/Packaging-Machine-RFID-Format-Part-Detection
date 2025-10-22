@@ -195,7 +195,7 @@ export default function TestLiveEventIdsPage() {
             if (typeof j.timestamp === "number") setTimestamp(j.timestamp);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     } catch {
       // ignore
     }
@@ -233,11 +233,11 @@ export default function TestLiveEventIdsPage() {
             const idAge = idTimestamps.get(id);
             const isRecent = idAge && (currentTime - idAge) < 5000; // 5 seconds
             return (
-              <li 
-                key={id} 
-                style={{ 
-                  fontFamily: "monospace", 
-                  fontSize: 14, 
+              <li
+                key={id}
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 14,
                   wordBreak: "break-all",
                   backgroundColor: isRecent ? "#22c55e20" : "transparent",
                   padding: "0px 1px",

@@ -2,20 +2,19 @@ let rfidTags = [];
 let formatParts = []; // Dynamic format parts from API
 let assignments = {}; // Format part -> RFID tag assignments from database
 
-// API configuration: prefer same-origin under HTTPS/nginx, else dev fallback to :8001
+// API configuration: prefer same-origin (use full origin including non-standard ports).
+// This ensures mapped ports like :4444 are preserved and requests go to the same origin the user opened.
 const API_BASE_URL = (() => {
   try {
-    const { protocol, host } = window.location; // host includes port when present
-    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-    if (protocol === 'https:' || isStandard) {
-      return `${protocol}//${host}`; // nginx reverse proxy - host preserves port like :4400
+    if (typeof window !== 'undefined') {
+      const origin = window.location.origin; // includes protocol + host + port when present
+      if (origin && origin.trim()) return origin;
     }
-    // dev: frontend likely on :3000 and backend on :8001 -> use hostname part and backend port
-    const hostnameOnly = host.split(':')[0];
-    return `${protocol}//${hostnameOnly}:8001`;
   } catch (e) {
-    return 'http://localhost:8001';
+    // ignore
   }
+  // Fallback for dev
+  return 'http://localhost:8001';
 })();
 
 // Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'S

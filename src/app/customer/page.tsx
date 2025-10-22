@@ -487,17 +487,21 @@ export default function CustomerPage() {
     // Resolve a base HTTP URL once for both WS and initial snapshot
     let resolvedBaseHttp = '';
     try {
-      let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
-      if (!tmp) {
-        const { protocol, host } = window.location; // host contains hostname[:port]
-        const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-        if (protocol === 'https:' || isStandard) {
-          tmp = `${protocol}//${host}`; // preserves port when mapped like :4400
-        } else {
-          const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
-          tmp = `${protocol}//${host.split(':')[0]}:${p}`;
+        let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+        if (!tmp) {
+          try {
+            // Prefer the full origin (protocol + host + port) so mapped ports like :4444 are preserved
+            if (typeof window !== 'undefined' && window.location && window.location.origin) {
+              tmp = window.location.origin;
+            } else {
+              const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
+              tmp = `http://localhost:${p}`;
+            }
+          } catch {
+            const p = (process.env.NEXT_PUBLIC_BACKEND_PORT as string) || '8001';
+            tmp = `http://localhost:${p}`;
+          }
         }
-      }
       resolvedBaseHttp = tmp;
     } catch {
       // ignore

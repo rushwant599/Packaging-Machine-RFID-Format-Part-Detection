@@ -4,25 +4,23 @@
 // Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
 const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+
 // Prefer explicit NEXT_PUBLIC_BACKEND_URL when provided (for CI/docker overrides).
-// Otherwise on the client build the base using window.location.host which includes the port when present
+// Otherwise, in the browser prefer the full origin (protocol + host + port) so the frontend
+// makes requests to the same origin the user used to open the app (works with nginx port mapping).
 if (!resolvedBase && typeof window !== 'undefined') {
   try {
-    const { protocol, host } = window.location; // host == hostname[:port]
-    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-    // If running under https or a standard host, use the full host (preserves :port when mapped by Docker)
-    if (protocol === 'https:' || isStandard) {
-      resolvedBase = `${protocol}//${host}`;
-    } else {
-      // development: typical case where frontend is on :3000 and backend listens on separate port
-      resolvedBase = `${protocol}//${host.split(':')[0]}:${backendPort}`;
+    const origin = window.location.origin;
+    if (origin && origin.trim()) {
+      resolvedBase = origin;
     }
   } catch {
     // ignore and fallback below
   }
 }
-// Fallback (Dev Einzelstart): localhost
-export const BACKEND_URL = resolvedBase || 'http://localhost:8001';
+
+// Fallback (Dev Einzelstart): explicit backend port or localhost
+export const BACKEND_URL = resolvedBase || `http://localhost:${backendPort}`;
 // Optional: kurze Debug-Ausgabe einmalig
 declare global {
   interface Window { __BACKEND_URL_LOGGED__?: boolean }

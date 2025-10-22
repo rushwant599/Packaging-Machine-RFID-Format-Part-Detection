@@ -39,23 +39,24 @@ const defaultConfig: Config = {
   THEME_COLOR: "#1976d2", // Default color
 };
 
+
 const backendUrl = ((): string => {
   const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (envUrl && envUrl.trim()) return envUrl;
+
   if (typeof window !== 'undefined') {
     try {
-      const { protocol, host } = window.location; // host includes port when present
-      const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-      if (protocol === 'https:' || isStandard) {
-        return `${protocol}//${host}`;
-      }
-      const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
-      return `${protocol}//${host.split(':')[0]}:${p}`;
+      // Prefer the full origin (protocol + host [+ port]) which matches how nginx will proxy
+      const origin = window.location.origin;
+      if (origin && origin.trim()) return origin;
     } catch {
-      // fallback
+      // ignore
     }
   }
-  return "http://localhost:8001";
+
+  // Fallback to explicit env port or localhost with default backend port
+  const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
+  return `http://localhost:${p}`;
 })();
 
 export default function SomicPage() {

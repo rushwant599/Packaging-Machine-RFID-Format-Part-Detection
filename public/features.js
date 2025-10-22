@@ -18,7 +18,7 @@ const API_BASE_URL = (() => {
   }
 })();
 
-// Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'
+// Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'S
 function sanitizeFormatPartId(id) {
   if (id == null) return '';
   return String(id).trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
@@ -32,14 +32,14 @@ function isSecureForCamera() {
   // getUserMedia requires a secure context (HTTPS) except on localhost
   try {
     if (typeof window !== 'undefined') {
-  const { protocol, hostname } = window.location;
+      const { protocol, hostname } = window.location;
       if (window.isSecureContext) return true;
       if (protocol === 'https:') return true;
       if (isLocalhostHost(hostname)) return true;
       // Also allow when served via http but behind a reverse proxy that terminates TLS and forwards as http with private IP
       // In such cases, browsers still block camera on http, so return false to show guidance.
     }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -47,14 +47,14 @@ async function loadFormatParts() {
   try {
     console.log('Loading format parts from API...');
     const response = await fetch(`${API_BASE_URL}/api/format-parts`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     const data = await response.json();
     console.log('Format parts loaded:', data);
-    
+
     if (data.formatParts && Array.isArray(data.formatParts)) {
       formatParts = data.formatParts.map(part => ({ id: part }));
       console.log(`Loaded ${formatParts.length} format parts:`, formatParts);
@@ -178,10 +178,10 @@ async function assignRFID(partId) {
   const select = document.getElementById('select-' + partId);
   const value = select.value;
   const checkbox = document.getElementById('check-' + partId);
-  
+
   // Save to database
   const success = await saveAssignment(partId, value);
-  
+
   if (success) {
     checkbox.checked = value !== "";
     checkAllAssigned();
@@ -214,12 +214,12 @@ function updateAssignmentDisplay() {
 function updatePartsDisplay() {
   const allList = document.getElementById('format-parts-list');
   const assignedList = document.getElementById('assigned-parts-list');
-  
+
   if (!allList || !assignedList) {
     console.error('Required DOM elements not found');
     return;
   }
-  
+
   // Clear existing content
   allList.innerHTML = '';
   assignedList.innerHTML = '';
@@ -228,7 +228,7 @@ function updatePartsDisplay() {
     assignedList.innerHTML = '<div class="no-parts">No parts to assign.</div>';
     return;
   }
-  
+
   formatParts.forEach(p => {
     // Right side - All Parts
     const row = document.createElement('div');
@@ -251,13 +251,13 @@ function updatePartsDisplay() {
     `;
     assignedList.appendChild(assigned);
   });
-  
+
   // Update dropdowns with RFID tags
   updateDropdowns();
-  
+
   // Update assignment display
   updateAssignmentDisplay();
-  
+
   console.log(`Updated display with ${formatParts.length} format parts`);
 }
 
@@ -272,14 +272,14 @@ async function loadAssignments() {
   try {
     console.log('Loading assignments from database...');
     const response = await fetch(`${API_BASE_URL}/api/format-assignments`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     const data = await response.json();
     console.log('Assignments loaded:', data);
-    
+
     if (data.success && data.assignments) {
       assignments = data.assignments;
       console.log(`Loaded ${Object.keys(assignments).length} assignments:`, assignments);
@@ -303,13 +303,13 @@ async function loadAssignments() {
 async function saveAssignment(formatPart, rfidTagId) {
   try {
     console.log(`Saving assignment: ${formatPart} -> ${rfidTagId}`);
-    
+
     if (!rfidTagId || rfidTagId === "") {
       // Unassign RFID from format part
       const response = await fetch(`${API_BASE_URL}/api/format-assignments/${formatPart}`, {
         method: 'DELETE'
       });
-      
+
       if (response.ok) {
         delete assignments[formatPart];
         console.log(`Unassigned RFID from ${formatPart}`);
@@ -330,7 +330,7 @@ async function saveAssignment(formatPart, rfidTagId) {
           rfid_tag_id: rfidTagId
         })
       });
-      
+
       if (response.ok) {
         assignments[formatPart] = rfidTagId;
         console.log(`Assigned ${rfidTagId} to ${formatPart}`);
@@ -361,8 +361,8 @@ document.addEventListener("keydown", (event) => {
 
 async function showPicture(id) {
   try {
-  const safeId = sanitizeFormatPartId(id);
-  const resp = await fetch(`${API_BASE_URL}/api/pictures/by-part/${safeId}`);
+    const safeId = sanitizeFormatPartId(id);
+    const resp = await fetch(`${API_BASE_URL}/api/pictures/by-part/${safeId}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     let files = [];
@@ -627,7 +627,7 @@ async function populateCameraSelect() {
       videoInputDevices.forEach((d, i) => {
         const opt = document.createElement('option');
         opt.value = String(i);
-        opt.textContent = d.label || `Camera ${i+1}`;
+        opt.textContent = d.label || `Camera ${i + 1}`;
         sel.appendChild(opt);
       });
       // default index
@@ -694,15 +694,15 @@ document.addEventListener('keydown', (e) => {
 // Initialize the application
 window.onload = async () => {
   console.log('Initializing RFID Parts Application...');
-  
+
   // Load RFID tags
   readRFIDTags();
-  
+
   // Load format parts from API
   await loadFormatParts();
-  
+
   // Load assignments from database
   await loadAssignments();
-  
+
   console.log('Application initialized successfully');
 };

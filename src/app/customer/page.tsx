@@ -28,7 +28,7 @@ interface FormatDetail {
   success?: boolean;
 }
 
-interface AssignmentsMapEntry { rfid_tag_id?: string; rfidTagId?: string; [k: string]: unknown }
+interface AssignmentsMapEntry { rfid_tag_id?: string; rfidTagId?: string;[k: string]: unknown }
 type AssignmentsMap = Record<string, AssignmentsMapEntry | string>;
 
 interface RFIDStatus {
@@ -108,7 +108,7 @@ function buildLineRowHtml(raw: string | undefined, fontSize: string): string | u
   body = normalizeImagesBlock(body);
   return `<div style="display:flex;align-items:center;gap:10px;font-size:${fontSize};color:#111;line-height:1.3;font-weight:400;">`
     + `<span style="font-weight:600;min-width:18px;">${arrow}</span>`
-  + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
+    + `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;">${body}</span>`
     + `</div>`;
 }
 
@@ -159,12 +159,12 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
         if (!currentSection) return;
         prepared.push({
           index: idx,
-            section: currentSection,
-            subSection: currentSubSection || undefined,
-            headerCells: currentHeaderCells,
-            cells: row.cells || [],
-            lineHtml: currentLineHtml,
-            kind: 'data'
+          section: currentSection,
+          subSection: currentSubSection || undefined,
+          headerCells: currentHeaderCells,
+          cells: row.cells || [],
+          lineHtml: currentLineHtml,
+          kind: 'data'
         });
         return;
       }
@@ -202,7 +202,7 @@ export default function CustomerPage() {
       return () => { bc.removeEventListener('message', onMsg); bc.close(); };
     } catch {
       // BroadcastChannel not supported; ignore
-      return () => {};
+      return () => { };
     }
   }, []);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
@@ -261,7 +261,7 @@ export default function CustomerPage() {
   }, [width, isMobile, isTablet, STEP_FONT_SIZE, compactTable]);
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
-  const COLUMN_WIDTHS: (string | number)[] | null = ['5%','45%','10%','10%','10%','20%'];
+  const COLUMN_WIDTHS: (string | number)[] | null = ['5%', '45%', '10%', '10%', '10%', '20%'];
   // RFID Status-Spalte wird dynamisch angezeigt, kein Konstante nötig
   // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
@@ -312,14 +312,14 @@ export default function CustomerPage() {
 
   // Lade geparste Tabellen-Zeilen aus Backend und bereite Steps auf
   useEffect(() => {
-  const loadSteps = async () => {
+    const loadSteps = async () => {
       setStepsLoading(true);
       setStepsError(null);
       try {
-    const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
-    const rowsMeta = data.rowsMeta;
-    if (!rowsMeta) { setSteps([]); return; }
-    setSteps(prepareSteps(rowsMeta, STEP_FONT_SIZE));
+        const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
+        const rowsMeta = data.rowsMeta;
+        if (!rowsMeta) { setSteps([]); return; }
+        setSteps(prepareSteps(rowsMeta, STEP_FONT_SIZE));
         setCurrentStep(0);
       } catch (e) {
         setStepsError(e instanceof Error ? e.message : 'Fehler beim Laden der Schritt-Liste');
@@ -335,9 +335,9 @@ export default function CustomerPage() {
     const loadFormats = async () => {
       setFormatLoading(true); setFormatError(null);
       try {
-  // Verwende Backend API Client (verhindert 404 auf Next.js eigener /api Route)
-  const json = await apiClient.getFormats() as { formats?: Record<string, unknown> };
-  const fmts = json.formats || {};
+        // Verwende Backend API Client (verhindert 404 auf Next.js eigener /api Route)
+        const json = await apiClient.getFormats() as { formats?: Record<string, unknown> };
+        const fmts = json.formats || {};
         setFormats(fmts);
         setFormatNames(Object.keys(fmts));
       } catch (e) {
@@ -351,15 +351,15 @@ export default function CustomerPage() {
   const [formatDetail, setFormatDetail] = React.useState<FormatDetail | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-  interface FormatDataApiResponse { success?: boolean; data?: FormatDetail }
-  const loadDetail = async () => {
+    interface FormatDataApiResponse { success?: boolean; data?: FormatDetail }
+    const loadDetail = async () => {
       if (!selectedFormat) { setFormatDetail(null); return; }
       try {
-    const detail = await apiClient.getFormatData() as FormatDataApiResponse;
-    if (!cancelled && detail?.success && detail.data) {
-      setFormatDetail(detail.data);
+        const detail = await apiClient.getFormatData() as FormatDataApiResponse;
+        if (!cancelled && detail?.success && detail.data) {
+          setFormatDetail(detail.data);
         }
-    } catch {
+      } catch {
         if (!cancelled) setFormatDetail(null);
       }
     };
@@ -430,13 +430,13 @@ export default function CustomerPage() {
         if (s.kind === 'data') {
           const fromEntry = fromMap.get(s.index);
           const toEntry = toMap.get(s.index);
-            // Falls Ziel ohne Änderung -> Schritt überspringen
+          // Falls Ziel ohne Änderung -> Schritt überspringen
           if (!toEntry && !fromEntry) return; // Keine Änderung in beiden
           // Entscheide ob relevante Spalten geändert wurden (2=Wert,3=FTL.,4=Wagen)
           const baseCells = [...s.cells];
           const fromCells = fromEntry ? fromEntry.cells : baseCells;
           const toCells = toEntry ? toEntry.cells : baseCells;
-          const changed = [2,3,4].some(i => (fromCells[i]||'').toString().trim() !== (toCells[i]||'').toString().trim());
+          const changed = [2, 3, 4].some(i => (fromCells[i] || '').toString().trim() !== (toCells[i] || '').toString().trim());
           if (!changed) return;
           const stepCells = [...toCells];
           const prevVal = s.cells[2];
@@ -473,9 +473,9 @@ export default function CustomerPage() {
     let cancelled = false;
     const fetchOnce = async () => {
       try {
-  const json = await apiClient.getFormatAssignments() as { success?: boolean; assignments?: AssignmentsMap };
-  if (!cancelled && json?.success && json.assignments) setAssignments(json.assignments);
-      } catch {}
+        const json = await apiClient.getFormatAssignments() as { success?: boolean; assignments?: AssignmentsMap };
+        if (!cancelled && json?.success && json.assignments) setAssignments(json.assignments);
+      } catch { }
     };
     fetchOnce();
     return () => { cancelled = true; };
@@ -499,7 +499,7 @@ export default function CustomerPage() {
         }
       }
       resolvedBaseHttp = tmp;
-    } catch  {
+    } catch {
       // ignore
     }
     const connect = () => {
@@ -523,10 +523,10 @@ export default function CustomerPage() {
             } else if (msg.type === 'assignments_update' && msg.assignments) {
               setAssignments(msg.assignments as AssignmentsMap);
             }
-          } catch {}
+          } catch { }
         };
         ws.onclose = () => { if (!closed) setTimeout(connect, 2000); };
-      } catch {}
+      } catch { }
     };
     connect();
     // Initial HTTP snapshot so UI shows immediately without manual refresh
@@ -538,7 +538,7 @@ export default function CustomerPage() {
           const norm = (snap.ids as unknown[]).map(t => normalizeTagId(t)).filter((t: string) => t.length > 0);
           setLiveEventTagIds(new Set(norm));
         }
-      } catch {}
+      } catch { }
     })();
     return () => { closed = true; if (ws) ws.close(); };
   }, [normalizeTagId]);
@@ -562,11 +562,11 @@ export default function CustomerPage() {
       if (!key) return s;
       let assignment = assignments[key];
       if (!assignment) {
-        const alt1 = key.replace(/\s+/g,' ').trim();
+        const alt1 = key.replace(/\s+/g, ' ').trim();
         assignment = assignments[alt1];
       }
       if (!assignment) {
-        const alt2 = key.replace(/\./g,'').replace(/\s+/g,' ').trim();
+        const alt2 = key.replace(/\./g, '').replace(/\s+/g, ' ').trim();
         assignment = assignments[alt2];
       }
       // assignment kann string oder objekt sein
@@ -576,11 +576,11 @@ export default function CustomerPage() {
       const tagId = rawTagId ? rawTagId.toString().trim() : null;
       const normTag = tagId ? normalizeTagId(tagId) : null;
       const seen = normTag ? liveEventTagIds.has(normTag) : false;
-  let symbol: string;
-  if (!tagId) symbol = '–';
-  else if (seen) symbol = '✔';
-  else symbol = '✖';
-  return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
+      let symbol: string;
+      if (!tagId) symbol = '–';
+      else if (seen) symbol = '✔';
+      else symbol = '✖';
+      return { ...s, _rfidStatus: { seen, tagId, tagIdNorm: normTag, keyTried: key, symbol } };
     });
   }, [enrichedSteps, assignments, liveEventTagIds, normalizeTagId]);
 
@@ -595,10 +595,10 @@ export default function CustomerPage() {
 
   const stopCamera = useCallback(() => {
     if (mediaStream) {
-      try { mediaStream.getTracks().forEach(t => t.stop()); } catch {}
+      try { mediaStream.getTracks().forEach(t => t.stop()); } catch { }
     }
     if (videoRef.current) {
-      try { (videoRef.current as HTMLVideoElement).srcObject = null; } catch {}
+      try { (videoRef.current as HTMLVideoElement).srcObject = null; } catch { }
     }
     setMediaStream(null);
   }, [mediaStream]);
@@ -740,11 +740,11 @@ export default function CustomerPage() {
       if (!key) return s;
       let assignment = assignments[key];
       if (!assignment) {
-        const alt1 = key.replace(/\s+/g,' ').trim();
+        const alt1 = key.replace(/\s+/g, ' ').trim();
         assignment = assignments[alt1];
       }
       if (!assignment) {
-        const alt2 = key.replace(/\./g,'').replace(/\s+/g,' ').trim();
+        const alt2 = key.replace(/\./g, '').replace(/\s+/g, ' ').trim();
         assignment = assignments[alt2];
       }
       const rawTagId = typeof assignment === 'string'
@@ -841,14 +841,14 @@ export default function CustomerPage() {
     }
   }, [totalSteps, currentStep]);
   return (
-    <div className="flex flex-col bg-white dark:bg-black" style={{ height: '100dvh', overflow:'hidden' }}>
+    <div className="flex flex-col bg-white dark:bg-black" style={{ height: '100dvh', overflow: 'hidden' }}>
       <Header profile="Customer" />
-      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      <main className="flex-1 w-full p-0 m-0" style={{ background: '#fff', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Steuerleiste */}
-        <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
-            <button onClick={()=>setShowSteps(s=>!s)} style={{ fontSize:'.65rem', padding:'4px 8px', border:'1px solid #bbb', background:'#fff', borderRadius:4, cursor:'pointer', color:'#000' }}>
+            <button onClick={() => setShowSteps(s => !s)} style={{ fontSize: '.65rem', padding: '4px 8px', border: '1px solid #bbb', background: '#fff', borderRadius: 4, cursor: 'pointer', color: '#000' }}>
               {showSteps ? 'Anleitung verbergen' : 'Anleitung anzeigen'}
             </button>
           </div>
@@ -857,33 +857,33 @@ export default function CustomerPage() {
           {showSteps && !stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
         </div>
         {/* Content Bereich der restliche Höhe füllt */}
-  <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', padding: showSteps ? '8px 10px' : 0, gap: showSteps ? 8 : 0, overflow:'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: showSteps ? '8px 10px' : 0, gap: showSteps ? 8 : 0, overflow: 'hidden' }}>
           {showSteps && current && (
-            <div style={{ flex:1, minHeight:0, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: isMobile ? '6px 8px' : '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4, position:'relative', flexShrink:0, flexWrap:isMobile ? 'wrap' : 'nowrap' }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid #e1e1e1', borderRadius: 6, padding: isMobile ? '6px 8px' : '8px 10px', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, position: 'relative', flexShrink: 0, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
                 {!diffMode && (
                   <>
-                    <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Format:</label>
+                    <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Format:</label>
                     <select id="formatSelect"
                       value={selectedFormat || ''}
                       onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
-                      style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}
+                      style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}
                     >
                       <option value=''>-- wählen --</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
-                    {selectedFormat && <button title="Format zurücksetzen" onClick={()=>{ setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding:'4px 6px', background:'#f4f4f4', color:'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>Reset</button>}
+                    {selectedFormat && <button title="Format zurücksetzen" onClick={() => { setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding: '4px 6px', background: '#f4f4f4', color: '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>Reset</button>}
                   </>
                 )}
                 {diffMode && (
                   <>
-                    <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Von:</label>
-                    <select id="fromFormat" value={fromFormat || ''} onChange={e=>{ setFromFormat(e.target.value||null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}>
+                    <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Von:</label>
+                    <select id="fromFormat" value={fromFormat || ''} onChange={e => { setFromFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>-- Quelle --</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
-                    <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight:600, color:'#222' }}>Nach:</label>
-                    <select id="toFormat" value={toFormat || ''} onChange={e=>{ setToFormat(e.target.value||null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding:'4px 6px', border:'1px solid #bbb', borderRadius:4, background:'#fff', color:'#111', fontWeight:500 }}>
+                    <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Nach:</label>
+                    <select id="toFormat" value={toFormat || ''} onChange={e => { setToFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>-- Ziel --</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
@@ -891,115 +891,115 @@ export default function CustomerPage() {
                 )}
                 <button
                   title="Wechsel-Modus: Zeigt nur Unterschiede von Quelle zu Ziel (alle Linien bleiben)"
-                  onClick={() => { setDiffMode(m=>!m); setCurrentStep(0); }}
-                  style={{ fontSize: '.65rem', padding:'4px 6px', background: diffMode ? '#222' : '#f4f4f4', color: diffMode ? '#fff':'#222', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}>
+                  onClick={() => { setDiffMode(m => !m); setCurrentStep(0); }}
+                  style={{ fontSize: '.65rem', padding: '4px 6px', background: diffMode ? '#222' : '#f4f4f4', color: diffMode ? '#fff' : '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>
                   {diffMode ? 'Wechsel-Modus an' : 'Wechsel-Modus aus'}
                 </button>
                 {diffMode && fromFormat && toFormat && fromFormat === toFormat && (
-                  <span style={{ fontSize:'.6rem', color:'#b00' }}>Bitte unterschiedliche Formate wählen</span>
+                  <span style={{ fontSize: '.6rem', color: '#b00' }}>Bitte unterschiedliche Formate wählen</span>
                 )}
-                {formatLoading && <span style={{ fontSize: '.65rem', color:'#444' }}>lädt…</span>}
-                {formatError && <span style={{ fontSize: '.65rem', color:'#b00' }}>{formatError}</span>}
-                <div style={{ marginLeft:'auto', display:'flex', gap:14, alignItems:'center', fontSize:'.65rem', fontWeight:600, color:'#222', flexWrap:'wrap' }}>
+                {formatLoading && <span style={{ fontSize: '.65rem', color: '#444' }}>lädt…</span>}
+                {formatError && <span style={{ fontSize: '.65rem', color: '#b00' }}>{formatError}</span>}
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 14, alignItems: 'center', fontSize: '.65rem', fontWeight: 600, color: '#222', flexWrap: 'wrap' }}>
                   <span title="Erkannte vs. zugeordnete Formatteile">{rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} Formatteile erkannt</span>
                   <span title="Erkannte Tags ohne Zuweisung" style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} falsche Formatteile erkannt</span>
                 </div>
               </div>
-              <div style={{ flex:1, minHeight:0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {/* Zentrier-Wrapper: zentriert vertikal bei freiem Platz, sonst normal top-aligned */}
-                <div style={{ display:'flex', flexDirection:'column', gap: 8, marginTop:'auto', marginBottom:'auto', alignSelf:'stretch' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto', marginBottom: 'auto', alignSelf: 'stretch' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {current.kind === 'data' && (
-                    <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 700, color: '#111', letterSpacing: '.06em', textTransform: 'uppercase' }}>{current.section}</div>
-                  )}
-                  {current.kind === 'data' && current.subSection && (
-                    <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222', letterSpacing: '.04em', textTransform: 'uppercase' }}>{current.subSection}</div>
-                  )}
-                  {current.kind === 'line' && current.lineContentHtml && (
-                    <div style={{ fontSize: STEP_FONT_SIZE }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
-                  )}
-                  </div>
-                  {current.kind === 'data' && current.headerCells && (
-                  <div ref={tableContainerRef} style={{ width:'100%', position:'relative' }}>
-                    <div
-                      style={compactTable ? { width:'100%' } : { transform:`scale(${tableScale})`, transformOrigin:'left top', width: tableScale < 1 ? `${100 / tableScale}%` : '100%', transition:'transform .15s ease-out' }}>
-                      <table ref={tableRef} style={{ borderCollapse:'collapse', width:'100%', fontSize:STEP_FONT_SIZE, color:'#111', tableLayout: compactTable ? 'auto':'fixed', minWidth: compactTable ? 'auto':650 }}>
-                        {!compactTable && COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
-                          <colgroup>
-                            {COLUMN_WIDTHS.map((w,i)=>{
-                              const colKey = `col_${current.headerCells?.[i] || i}`;
-                              return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
-                            })}
-                            {current._rfidStatus && <col style={{ width:'6%' }} />}
-                          </colgroup>
-                        )}
-                        <thead>
-                          <tr>
-                            {current.headerCells.map((h:string)=>{
-                              const key = 'h_'+(h||'').toString().trim().toLowerCase().replace(/\s+/g,'_');
-                              const widthAuto = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
-                              return <th key={key} style={{ border:'1px solid #b7b7b7', padding:'6px 6px', background:'#e9ecef', textAlign:'left', fontWeight:600, overflow: compactTable ? 'visible':'hidden', textOverflow: compactTable ? 'clip':'ellipsis', whiteSpace: compactTable ? 'normal':'nowrap', width: widthAuto, color:'#222', fontSize:STEP_FONT_SIZE, lineHeight:1.15 }}>{h}</th>;
-                            })}
-                            {current._rfidStatus && <th style={{ border:'1px solid #b7b7b7', padding:'6px 8px', background:'#e9ecef', textAlign:'left', fontWeight:600, fontSize:STEP_FONT_SIZE }}>RFID</th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            {current.cells.map((c:string,i:number)=>{
-                              const key = 'c_'+(c||'').toString().trim().toLowerCase().replace(/\s+/g,'_')+'_'+i;
-                              const injected = current._injectedValue && [2,3,4].includes(i);
-                              const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
-                              const changed = diffMode && fromVal !== undefined && fromVal !== c && [2,3,4].includes(i);
-                              let cellStyle: React.CSSProperties = {
-                                border:'1px solid #c5c5c5',
-                                padding:'6px 6px',
-                                background: changed ? '#ffe8e6' : (injected ? '#fff9e6':'#fff'),
-                                fontSize: STEP_FONT_SIZE,
-                                overflow: compactTable ? 'visible':'hidden',
-                                textOverflow: compactTable ? 'clip':'ellipsis',
-                                whiteSpace: compactTable ? 'normal':'nowrap',
-                                wordBreak: compactTable ? 'break-word':'normal',
-                                fontWeight: changed ? 700 : (injected ? 600:400),
-                                color:'#111',
-                                lineHeight:1.25,
-                                verticalAlign:'top'
-                              };
-                              // Apply color to FTL. column
-                              // Todo: Improve logic to detect FTL./Nr. column 
-                              if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g,"") === "nr") {
-                                cellStyle = { ...cellStyle, background: color, color: '#fff', fontWeight: 600 };
-                              }
-                              return <td key={key} style={cellStyle}>
-                                {changed ? (
-                                  <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                                    <span>{c}</span>
-                                    {fromVal && <span style={{ fontSize:'0.55rem', color:'#b00', fontWeight:500 }}>alt: {fromVal}</span>}
-                                  </div>
-                                ) : c}
-                              </td>;
-                            })}
-                            {current._rfidStatus && (()=>{
-                              const rs = current._rfidStatus; let rfidColor = '#666'; if (rs.tagId) rfidColor = rs.seen ? '#0a7a15':'#b30000';
-                              let titleText: string; if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`; else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`; else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
-                              return <td style={{ border:'1px solid #c5c5c5', padding:'6px 8px', background:'#fff', fontSize:STEP_FONT_SIZE, fontWeight:700, color:rfidColor }} title={titleText}>{rs.symbol}</td>;
-                            })()}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    {!compactTable && tableScale < 1 && (
-                      <div style={{ position:'absolute', right:4, bottom:4, background:'rgba(0,0,0,0.55)', color:'#fff', padding:'2px 6px', borderRadius:4, fontSize:'.55rem', letterSpacing:'.05em' }}>Skaliert {Math.round(tableScale*100)}%</div>
+                    {current.kind === 'data' && (
+                      <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 700, color: '#111', letterSpacing: '.06em', textTransform: 'uppercase' }}>{current.section}</div>
+                    )}
+                    {current.kind === 'data' && current.subSection && (
+                      <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222', letterSpacing: '.04em', textTransform: 'uppercase' }}>{current.subSection}</div>
+                    )}
+                    {current.kind === 'line' && current.lineContentHtml && (
+                      <div style={{ fontSize: STEP_FONT_SIZE }} dangerouslySetInnerHTML={{ __html: current.lineContentHtml }} />
                     )}
                   </div>
-                )}
+                  {current.kind === 'data' && current.headerCells && (
+                    <div ref={tableContainerRef} style={{ width: '100%', position: 'relative' }}>
+                      <div
+                        style={compactTable ? { width: '100%' } : { transform: `scale(${tableScale})`, transformOrigin: 'left top', width: tableScale < 1 ? `${100 / tableScale}%` : '100%', transition: 'transform .15s ease-out' }}>
+                        <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: compactTable ? 'auto' : 'fixed', minWidth: compactTable ? 'auto' : 650 }}>
+                          {!compactTable && COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
+                            <colgroup>
+                              {COLUMN_WIDTHS.map((w, i) => {
+                                const colKey = `col_${current.headerCells?.[i] || i}`;
+                                return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
+                              })}
+                              {current._rfidStatus && <col style={{ width: '6%' }} />}
+                            </colgroup>
+                          )}
+                          <thead>
+                            <tr>
+                              {current.headerCells.map((h: string) => {
+                                const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
+                                const widthAuto = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
+                                return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 6px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: compactTable ? 'visible' : 'hidden', textOverflow: compactTable ? 'clip' : 'ellipsis', whiteSpace: compactTable ? 'normal' : 'nowrap', width: widthAuto, color: '#222', fontSize: STEP_FONT_SIZE, lineHeight: 1.15 }}>{h}</th>;
+                              })}
+                              {current._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              {current.cells.map((c: string, i: number) => {
+                                const key = 'c_' + (c || '').toString().trim().toLowerCase().replace(/\s+/g, '_') + '_' + i;
+                                const injected = current._injectedValue && [2, 3, 4].includes(i);
+                                const fromVal = diffMode && current._fromCells ? current._fromCells[i] : undefined;
+                                const changed = diffMode && fromVal !== undefined && fromVal !== c && [2, 3, 4].includes(i);
+                                let cellStyle: React.CSSProperties = {
+                                  border: '1px solid #c5c5c5',
+                                  padding: '6px 6px',
+                                  background: changed ? '#ffe8e6' : (injected ? '#fff9e6' : '#fff'),
+                                  fontSize: STEP_FONT_SIZE,
+                                  overflow: compactTable ? 'visible' : 'hidden',
+                                  textOverflow: compactTable ? 'clip' : 'ellipsis',
+                                  whiteSpace: compactTable ? 'normal' : 'nowrap',
+                                  wordBreak: compactTable ? 'break-word' : 'normal',
+                                  fontWeight: changed ? 700 : (injected ? 600 : 400),
+                                  color: '#111',
+                                  lineHeight: 1.25,
+                                  verticalAlign: 'top'
+                                };
+                                // Apply color to FTL. column
+                                // Todo: Improve logic to detect FTL./Nr. column 
+                                if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g, "") === "nr") {
+                                  cellStyle = { ...cellStyle, background: color, color: '#fff', fontWeight: 600 };
+                                }
+                                return <td key={key} style={cellStyle}>
+                                  {changed ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                      <span>{c}</span>
+                                      {fromVal && <span style={{ fontSize: '0.55rem', color: '#b00', fontWeight: 500 }}>alt: {fromVal}</span>}
+                                    </div>
+                                  ) : c}
+                                </td>;
+                              })}
+                              {current._rfidStatus && (() => {
+                                const rs = current._rfidStatus; let rfidColor = '#666'; if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
+                                let titleText: string; if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`; else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`; else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                                return <td style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: '#fff', fontSize: STEP_FONT_SIZE, fontWeight: 700, color: rfidColor }} title={titleText}>{rs.symbol}</td>;
+                              })()}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      {!compactTable && tableScale < 1 && (
+                        <div style={{ position: 'absolute', right: 4, bottom: 4, background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: '.55rem', letterSpacing: '.05em' }}>Skaliert {Math.round(tableScale * 100)}%</div>
+                      )}
+                    </div>
+                  )}
                   {/* Bilder Bereich */}
                   {/* Bilder nur anzeigen, wenn es sich um einen echten Formatteil handelt UND mindestens 1 Bild vorhanden oder gerade lädt */}
                   {current.kind === 'data' && (() => {
-                  const key = derivePicturePartKey(current);
-                  if (!key) return null; // kein echtes Formatteil
-                  return (
-                    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {/*
+                    const key = derivePicturePartKey(current);
+                    if (!key) return null; // kein echtes Formatteil
+                    return (
+                      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {/*
                       {/* Upload/Aktionen 
                       <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                         <button
@@ -1012,39 +1012,39 @@ export default function CustomerPage() {
                         )}
                       </div>
                       */}
-                      {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color:'#555' }}>Lade Bild…</div>}
-                      {!pictureLoading && currentPictures.length > 0 && (
-                        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                          <div style={{ fontSize: STEP_FONT_SIZE, fontWeight:600, color:'#222' }}>Bild</div>
-                          <div style={{ width:'100%', display:'flex', justifyContent:'flex-start' }}>
-                            {currentPictures.map(fn => {
-                              const src = `${BACKEND_URL}/pictures/${encodeURIComponent(fn)}`;
-                              return (
-                                <div key={fn} style={{ position:'relative', maxWidth:'100%', flex:'0 1 auto', border:'1px solid #ddd', borderRadius:6, padding:4, background:'#fafafa' }}>
-                                  <div
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => setPreviewImage(src)}
-                                    onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') { e.preventDefault(); setPreviewImage(src);} }}
-                                    style={{ outline:'none', cursor:'pointer', maxWidth:'100%' }}
-                                  >
-                                    <img
-                                      src={src}
-                                      alt={fn}
-                                      style={{ display:'block', width:'auto', height:'auto', maxWidth:'100%', maxHeight: inlineImageMaxHeight, objectFit:'contain', borderRadius:4 }}
-                                      loading="lazy"
-                                    />
+                        {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color: '#555' }}>Lade Bild…</div>}
+                        {!pictureLoading && currentPictures.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222' }}>Bild</div>
+                            <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-start' }}>
+                              {currentPictures.map(fn => {
+                                const src = `${BACKEND_URL}/pictures/${encodeURIComponent(fn)}`;
+                                return (
+                                  <div key={fn} style={{ position: 'relative', maxWidth: '100%', flex: '0 1 auto', border: '1px solid #ddd', borderRadius: 6, padding: 4, background: '#fafafa' }}>
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => setPreviewImage(src)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreviewImage(src); } }}
+                                      style={{ outline: 'none', cursor: 'pointer', maxWidth: '100%' }}
+                                    >
+                                      <img
+                                        src={src}
+                                        alt={fn}
+                                        style={{ display: 'block', width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: inlineImageMaxHeight, objectFit: 'contain', borderRadius: 4 }}
+                                        loading="lazy"
+                                      />
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {!pictureLoading && currentPictures.length === 0 && (
-                        <div style={{ fontSize: '.55rem', color:'#777' }}>Kein Bild vorhanden</div>
-                      )}
-                    </div>
+                        )}
+                        {!pictureLoading && currentPictures.length === 0 && (
+                          <div style={{ fontSize: '.55rem', color: '#777' }}>Kein Bild vorhanden</div>
+                        )}
+                      </div>
                     );
                   })()}
                 </div>
@@ -1053,7 +1053,7 @@ export default function CustomerPage() {
                   <div style={{ marginTop: 6, borderTop: '1px solid #e6e6e6', paddingTop: 8, color: '#333', fontSize: '.78rem' }} dangerouslySetInnerHTML={{ __html: footerHtml }} />
                 )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink:0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink: 0 }}>
                 <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
                 <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
                 <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {totalSteps}</div>
@@ -1062,11 +1062,11 @@ export default function CustomerPage() {
             </div>
           )}
           {!showSteps && fileUrl && (
-            <div style={{ flex:1, minHeight:0, display:'flex' }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               <iframe
                 src={fileUrl}
                 title="Externe HTML"
-                style={{ width: '100%', flex:1, border: 'none', background: '#fff', display: 'block', overflow:'auto' }}
+                style={{ width: '100%', flex: 1, border: 'none', background: '#fff', display: 'block', overflow: 'auto' }}
               />
             </div>
           )}
@@ -1074,24 +1074,24 @@ export default function CustomerPage() {
       </main>
       {previewImage && (
         <div
-          onClick={()=>setPreviewImage(null)}
+          onClick={() => setPreviewImage(null)}
           role="dialog"
           aria-modal="true"
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:'4vw' }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '4vw' }}
         >
           <div
-            onClick={e=>e.stopPropagation()}
-            style={{ position:'relative', maxWidth:'94vw', maxHeight:'90vh', display:'flex', flexDirection:'column', gap:8 }}
+            onClick={e => e.stopPropagation()}
+            style={{ position: 'relative', maxWidth: '94vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: 8 }}
           >
             <button
               type="button"
-              onClick={()=>setPreviewImage(null)}
-              style={{ position:'absolute', top:4, right:4, background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:4, fontSize:'.7rem', cursor:'pointer' }}
+              onClick={() => setPreviewImage(null)}
+              style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, fontSize: '.7rem', cursor: 'pointer' }}
             >Schließen ✕</button>
             <img
               src={previewImage}
               alt="Vorschau"
-              style={{ maxWidth:'100%', maxHeight:'90vh', objectFit:'contain', borderRadius:6, boxShadow:'0 4px 18px rgba(0,0,0,0.4)' }}
+              style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: 6, boxShadow: '0 4px 18px rgba(0,0,0,0.4)' }}
             />
           </div>
         </div>
@@ -1101,28 +1101,28 @@ export default function CustomerPage() {
         <div
           role="dialog"
           aria-modal="true"
-          onClick={()=>closeUpload()}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:10000 }}
+          onClick={() => closeUpload()}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
         >
-          <div onClick={e=>e.stopPropagation()} style={{ background:'#fff', borderRadius:8, padding:16, minWidth:280, maxWidth:'90vw', display:'flex', flexDirection:'column', gap:10 }}>
-            <h3 style={{ margin:0, fontSize:'1rem',color:'#000' }}>Upload Bild{uploadPartId ? ` für ${uploadPartId}`: ''}</h3>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-              <input ref={fileInputRef} type="file" accept="image/*" style={{ display:'none' }} onChange={onFileSelected} />
-              <button type="button" onClick={()=>fileInputRef.current?.click()} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Datei wählen</button>
-              <button type="button" onClick={toggleCamera} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>{mediaStream ? 'Kamera läuft' : 'Kamera'}</button>
-              <button type="button" onClick={()=>closeUpload()} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Schließen</button>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 8, padding: 16, minWidth: 280, maxWidth: '90vw', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: '1rem', color: '#000' }}>Upload Bild{uploadPartId ? ` für ${uploadPartId}` : ''}</h3>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileSelected} />
+              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Datei wählen</button>
+              <button type="button" onClick={toggleCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{mediaStream ? 'Kamera läuft' : 'Kamera'}</button>
+              <button type="button" onClick={() => closeUpload()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Schließen</button>
             </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <video ref={videoRef} autoPlay playsInline style={{ display: mediaStream ? 'block':'none', maxWidth:'80vw', maxHeight:'40vh', border:'1px solid #ddd', borderRadius:4 }} />
-              <canvas ref={canvasRef} style={{ display:'none' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <video ref={videoRef} autoPlay playsInline style={{ display: mediaStream ? 'block' : 'none', maxWidth: '80vw', maxHeight: '40vh', border: '1px solid #ddd', borderRadius: 4 }} />
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
               {mediaStream && (
-                <div style={{ display:'flex', gap:8 }}>
-                  <button type="button" onClick={takeSnapshot} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Foto aufnehmen</button>
-                  <button type="button" onClick={stopCamera} style={{ padding:'6px 10px', border:'1px solid #bbb', borderRadius:4, background:'#f4f4f4', cursor:'pointer', color:'#000' }}>Kamera stoppen</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={takeSnapshot} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Foto aufnehmen</button>
+                  <button type="button" onClick={stopCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Kamera stoppen</button>
                 </div>
               )}
             </div>
-            <div style={{ minHeight:18, fontSize:'.8rem', color:'#000' }}>{uploadMsg}</div>
+            <div style={{ minHeight: 18, fontSize: '.8rem', color: '#000' }}>{uploadMsg}</div>
           </div>
         </div>
       )}

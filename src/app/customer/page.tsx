@@ -997,9 +997,35 @@ export default function CustomerPage() {
                                 </td>;
                               })}
                               {current._rfidStatus && (() => {
-                                const rs = current._rfidStatus; let rfidColor = '#666'; if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
-                                let titleText: string; if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`; else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`; else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
-                                return <td style={{ border: '1px solid #c5c5c5', padding: '6px 8px', background: '#fff', fontSize: STEP_FONT_SIZE, fontWeight: 700, color: rfidColor }} title={titleText}>{rs.symbol}</td>;
+                                const rs = current._rfidStatus;
+                                let rfidColor = '#666';
+                                if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
+                                // Background color by symbol/state
+                                let bg = '#fff';
+                                if (rs.tagId) {
+                                  bg = rs.seen ? '#99e47cff' : '#ec7e7eff';
+                                }
+                                let titleText: string;
+                                if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`;
+                                else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                                else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                                return (
+                                  <td
+                                    style={{
+                                      border: '1px solid #c5c5c5',
+                                      padding: '6px 8px',
+                                      background: bg,
+                                      fontSize: STEP_FONT_SIZE,
+                                      fontWeight: 700,
+                                      color: rfidColor,
+                                      textAlign: 'center',
+                                      verticalAlign: 'middle',
+                                    }}
+                                    title={titleText}
+                                  >
+                                    {rs.symbol}
+                                  </td>
+                                );
                               })()}
                             </tr>
                           </tbody>

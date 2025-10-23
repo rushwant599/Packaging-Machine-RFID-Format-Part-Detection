@@ -260,8 +260,13 @@ export default function CustomerPage() {
     setTableScale(clamped);
   }, [width, isMobile, isTablet, STEP_FONT_SIZE, compactTable]);
   // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
-  // Prozent oder px möglich. Auf null setzen um automatische Verteilung zu erhalten.
-  const COLUMN_WIDTHS: (string | number)[] | null = ['5%', '45%', '10%', '10%', '10%', '20%'];
+  type ColWidths = (string | number)[];
+  const COLUMN_WIDTHS_BY_COUNT: Record<number, ColWidths> = {
+    // 6 Spalten: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung
+    6: ['5%', '45%', '10%', '10%', '10%', '20%'],
+    // 5 Spalten: Nr. | Umstellpunkt | Wert | FTL. | Bemerkung
+    5: ['6%', '52%', '11%', '11%', '20%'],
+  };
   // RFID Status-Spalte wird dynamisch angezeigt, kein Konstante nötig
   // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
@@ -928,9 +933,9 @@ export default function CustomerPage() {
                       <div
                         style={compactTable ? { width: '100%' } : { transform: `scale(${tableScale})`, transformOrigin: 'left top', width: tableScale < 1 ? `${100 / tableScale}%` : '100%', transition: 'transform .15s ease-out' }}>
                         <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%', fontSize: STEP_FONT_SIZE, color: '#111', tableLayout: compactTable ? 'auto' : 'fixed', minWidth: compactTable ? 'auto' : 650 }}>
-                          {!compactTable && COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells.length && (
+                          {!compactTable && COLUMN_WIDTHS_BY_COUNT[current.headerCells.length] && (
                             <colgroup>
-                              {COLUMN_WIDTHS.map((w, i) => {
+                              {COLUMN_WIDTHS_BY_COUNT[current.headerCells.length].map((w, i) => {
                                 const colKey = `col_${current.headerCells?.[i] || i}`;
                                 return <col key={colKey} style={{ width: typeof w === 'number' ? `${w}px` : w }} />;
                               })}
@@ -941,10 +946,19 @@ export default function CustomerPage() {
                             <tr>
                               {current.headerCells.map((h: string) => {
                                 const key = 'h_' + (h || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
-                                const widthAuto = COLUMN_WIDTHS && COLUMN_WIDTHS.length === current.headerCells!.length ? undefined : `${100 / current.headerCells!.length}%`;
+                                const totalCols = current.headerCells!.length + (current._rfidStatus ? 1 : 0);
+                                const hasFixed = !compactTable && !!COLUMN_WIDTHS_BY_COUNT[current.headerCells!.length];
+                                const widthAuto = hasFixed ? undefined : `${100 / Math.max(totalCols, 1)}%`;
                                 return <th key={key} style={{ border: '1px solid #b7b7b7', padding: '6px 6px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, overflow: compactTable ? 'visible' : 'hidden', textOverflow: compactTable ? 'clip' : 'ellipsis', whiteSpace: compactTable ? 'normal' : 'nowrap', width: widthAuto, color: '#222', fontSize: STEP_FONT_SIZE, lineHeight: 1.15 }}>{h}</th>;
                               })}
-                              {current._rfidStatus && <th style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, fontSize: STEP_FONT_SIZE }}>RFID</th>}
+                              {current._rfidStatus && (() => {
+                                const totalCols = current.headerCells!.length + 1;
+                                const hasFixed = !compactTable && !!COLUMN_WIDTHS_BY_COUNT[current.headerCells!.length];
+                                const widthAuto = hasFixed ? undefined : `${100 / Math.max(totalCols, 1)}%`;
+                                return (
+                                  <th style={{ border: '1px solid #b7b7b7', padding: '6px 8px', background: '#e9ecef', textAlign: 'left', fontWeight: 600, fontSize: STEP_FONT_SIZE, width: widthAuto }}>RFID</th>
+                                );
+                              })()}
                             </tr>
                           </thead>
                           <tbody>

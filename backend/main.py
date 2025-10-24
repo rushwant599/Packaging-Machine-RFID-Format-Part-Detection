@@ -14,6 +14,10 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import json
+import base64
+import secrets
+import mimetypes
+from datetime import datetime
 
 # Local modules
 from format_parser import FormatDataManager
@@ -49,7 +53,7 @@ logging.basicConfig(level=logging.INFO)
 # Get configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
-DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 # Basic process configuration logging
 logger.info(f"Configuration loaded:")
@@ -128,7 +132,6 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, opc_event_listener
     global opc_manager, format_manager, assignment_manager, opc_event_listener
     # Startup
     logger.info("Starting RFID Parts Backend...")
@@ -337,6 +340,7 @@ app.add_middleware(
 # Debug Middleware um CORS-Probleme (400) zu analysieren
 @app.middleware("http")
 async def _cors_debug_logger(request, call_next):  # noqa: D401
+    """Debug middleware to log CORS OPTIONS requests and headers."""
     if request.method == "OPTIONS":
         origin = request.headers.get("origin")
         acrm = request.headers.get("access-control-request-method")
@@ -1007,7 +1011,7 @@ async def get_assignment_for_format_part(format_part: str):
         raise HTTPException(status_code=500, detail="Error retrieving assignment")
 
 @app.get("/api/config")
-def get_config():
+async def get_config():
     config = load_config()
     logger.info(f"Config GET: {config}")
     return config
@@ -1015,7 +1019,7 @@ def get_config():
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate):
     """Update configuration settings"""
-    global opc_manager, rfid_opc_manager, opc_event_listener
+    global opc_manager, opc_event_listener
     config = load_config()
     
     try:
@@ -1160,11 +1164,6 @@ async def upload_picture(
     image_base64: str | None = Form(None),
 ):
     """Upload a picture for a specific format part, either as a file upload or base64 string."""
-    import base64
-    import secrets
-    import mimetypes
-    from datetime import datetime
-
     part_clean = _sanitize_part(format_part)
 
     if not (file or image_base64):
@@ -1175,8 +1174,8 @@ async def upload_picture(
             raise HTTPException(status_code=500, detail="Pictures directory unavailable")
 
     content: bytes
+    content: bytes = b""
     ext = "jpg"
-
     if file:
         try:
             content = await file.read()
@@ -1192,9 +1191,13 @@ async def upload_picture(
             ext = guessed_ext.lstrip('.')
     else:
         b64 = image_base64.strip()
+        if not b64:
+            raise HTTPException(status_code=400, detail="Empty base64 image string")
         if b64.startswith("data:"):
             try:
                 header, b64data = b64.split(",", 1)
+                if not b64data:
+                    raise ValueError("No base64 data found in data URL")
                 if ";base64" in header:
                     if "image/" in header:
                         mime = header.split(";")[0].split(":", 1)[1]
@@ -1343,12 +1346,12 @@ async def get_opc_ua_events_status():
 
 # Hex ID Extraktion & Live Event IDs Endpoint
 import re as _re
-HEX_ID_REGEX = _re.compile(r"Ausgabe:([0-9A-Fa-f]+)")
+_HEX_ID_REGEX = _re.compile(r"Ausgabe:([0-9A-Fa-f]+)")
 
 # Live Event Hex IDs Puffer
 def extract_hex_ids_from_payload(payload: str):
     core = payload.replace('<STX>', '').replace('<ETX>', '')
-    found = HEX_ID_REGEX.findall(core)
+    found = _HEX_ID_REGEX.findall(core)
     seen = set()
     ordered = []
     for f in found:

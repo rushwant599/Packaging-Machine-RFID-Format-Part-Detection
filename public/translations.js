@@ -1,54 +1,56 @@
-// Placeholder for future i18n
+// Simple i18n for public pages (somic.html)
 const translations = {
   de: {
-    title: "RFID-Überwachung",
-    activeFormat: "Aktives Format",
-    partsStatus: "Teile-Status",
-    detectedTags: "Erkannte RFID-Tags",
-    language: "Sprache"
-  },
-  cz: {
-    title: "RFID Monitorování",
-    activeFormat: "Aktuální formát",
-    partsStatus: "Stav součástek",
-    detectedTags: "Detekované RFID tagy",
-    language: "Jazyk"
-  },
-  es: {
-    title: "Supervisión de RFID",
-    activeFormat: "Formato activo",
-    partsStatus: "Estado de las piezas",
-    detectedTags: "Etiquetas RFID detectadas",
-    language: "Idioma"
-  },
-  fr: {
-    title: "Surveillance RFID",
-    activeFormat: "Format actif",
-    partsStatus: "Statut des pièces",
-    detectedTags: "Tags RFID détectés",
-    language: "Langue"
-  },
-  it: {
-    title: "Monitoraggio RFID",
-    activeFormat: "Formato attivo",
-    partsStatus: "Stato dei componenti",
-    detectedTags: "Tag RFID rilevati",
-    language: "Lingua"
+    assignedParts: "Zugeordnete Teile",
+    allPartsAssigned: "Alle Teile zugeordnet",
+    allFormatParts: "Alle Formatteile",
+    readTags: "RFID-Tags lesen",
+    refreshParts: "Teile aktualisieren",
   },
   en: {
-    title: "RFID Monitoring",
-    activeFormat: "Active Format",
-    partsStatus: "Parts Status",
-    detectedTags: "Detected RFID Tags",
-    language: "Language"
+    assignedParts: "Assigned Parts",
+    allPartsAssigned: "All parts assigned",
+    allFormatParts: "All Format Parts",
+    readTags: "Read RFID Tags",
+    refreshParts: "Refresh Parts",
   }
 };
 
 function setLanguage(lang) {
   const t = translations[lang] || translations.en;
-  document.getElementById('app-title').textContent = t.title;
-  document.getElementById('active-format-label').textContent = t.activeFormat;
-  document.getElementById('parts-status-label').textContent = t.partsStatus;
-  document.getElementById('detected-tags-label').textContent = t.detectedTags;
-  document.getElementById('lang-label').textContent = t.language;
+  const byId = (id) => document.getElementById(id);
+  const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
+  setText('assigned-parts-title', t.assignedParts);
+  setText('final-check-label', t.allPartsAssigned);
+  setText('all-format-parts-title', t.allFormatParts);
+  setText('btn-read-tags', t.readTags);
+  setText('btn-refresh-parts', t.refreshParts);
 }
+
+// If used standalone, initialize from URL parameter
+(() => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const lang = (params.get('lang') || '').toLowerCase();
+    if (lang === 'de' || lang === 'en') {
+      // wait for DOM content
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setLanguage(lang));
+      } else {
+        setLanguage(lang);
+      }
+      try { document.documentElement.lang = lang; } catch {}
+    }
+  } catch {}
+})();
+
+// Listen to parent window messages to update language dynamically without reload
+window.addEventListener('message', (ev) => {
+  try {
+    const data = ev.data || {};
+    if (data && data.type === 'set-language' && (data.lang === 'de' || data.lang === 'en')) {
+      setLanguage(data.lang);
+      try { document.documentElement.lang = data.lang; } catch {}
+    }
+  } catch {}
+});

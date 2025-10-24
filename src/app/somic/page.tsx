@@ -61,7 +61,7 @@ const backendUrl = ((): string => {
 })();
 
 export default function SomicPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState("");
@@ -103,6 +103,21 @@ export default function SomicPage() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  // Keep iframe language in sync when user toggles DE/EN without reload
+  useEffect(() => {
+    try {
+      type IframeWin = Window & { setLanguage?: (l: string) => void };
+      const win = iframeRef.current?.contentWindow as IframeWin | null;
+      if (win?.setLanguage) {
+        win.setLanguage(lang);
+      } else if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
+      }
+    } catch {
+      // ignore cross-origin or timing issues
+    }
+  }, [lang]);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -212,14 +227,15 @@ export default function SomicPage() {
               {showConfig ? t("settings_close") : t("settings_open")}
             </button>
             <iframe
-              src="/somic.html"
+              src={`/somic.html?lang=${lang}`}
               className="w-full h-full border-0"
               style={{ minHeight: "80vh" }}
               title="Somic Inhalt"
               ref={iframeRef}
               onLoad={() => {
                 try {
-                  const win = iframeRef.current?.contentWindow as (Window & { readRFIDTags?: () => void; __rfidAutoReadDone?: boolean }) | null;
+                  type IframeWin = Window & { readRFIDTags?: () => void; __rfidAutoReadDone?: boolean; setLanguage?: (l: string) => void };
+                  const win = iframeRef.current?.contentWindow as IframeWin | null;
                   if (!win) return;
                   let attempts = 0;
                   const maxAttempts = 50; // ~10s @ 200ms
@@ -250,6 +266,8 @@ export default function SomicPage() {
                       console.error('RFID auto-read polling failed:', err);
                     }
                   }, 200);
+                  // Try to set language immediately after load as well
+                  try { win.setLanguage?.(lang); } catch {}
                 } catch (e) {
                   console.error("Failed to setup auto-run for readRFIDTags:", e);
                 }

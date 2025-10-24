@@ -177,7 +177,7 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
 }
 
 export default function CustomerPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { isMobile, isTablet, width } = useViewport();
   // Fetch color from config
   const [color, setColor] = React.useState<string>("#1976d2");
@@ -774,6 +774,7 @@ export default function CustomerPage() {
   const totalSteps = stepsWithStatus.length;
   // Bild-Preview Overlay
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const htmlIframeRef = useRef<HTMLIFrameElement | null>(null);
   // Dynamische Max-Höhe für Inline-Bild (kein Scroll nötig)
   const inlineImageMaxHeight = React.useMemo(() => {
     if (width < 480) return '26vh';
@@ -787,6 +788,19 @@ export default function CustomerPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Keep iframe language in sync when toggled
+  useEffect(() => {
+    try {
+      type IframeWin = Window & { setLanguage?: (l: string) => void };
+      const win = htmlIframeRef.current?.contentWindow as IframeWin | null;
+      if (win?.setLanguage) {
+        win.setLanguage(lang);
+      } else if (htmlIframeRef.current?.contentWindow) {
+        htmlIframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
+      }
+    } catch { /* ignore */ }
+  }, [lang]);
 
   // --- Bilder für aktuellen Schritt ---
   const [currentPictures, setCurrentPictures] = useState<string[]>([]);
@@ -1113,6 +1127,18 @@ export default function CustomerPage() {
                 src={fileUrl}
                 title={t('external_html')}
                 style={{ width: '100%', flex: 1, border: 'none', background: '#fff', display: 'block', overflow: 'auto' }}
+                ref={htmlIframeRef}
+                onLoad={() => {
+                  try {
+                    type IframeWin = Window & { setLanguage?: (l: string) => void };
+                    const win = htmlIframeRef.current?.contentWindow as IframeWin | null;
+                    if (win?.setLanguage) {
+                      win.setLanguage(lang);
+                    } else if (htmlIframeRef.current?.contentWindow) {
+                      htmlIframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
+                    }
+                  } catch { /* ignore */ }
+                }}
               />
             </div>
           )}

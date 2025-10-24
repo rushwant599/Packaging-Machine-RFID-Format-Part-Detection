@@ -1,4 +1,94 @@
 (function () {
+  // --- Minimal i18n -------------------------------------------------------
+  var LANG = (function detectLang() {
+    try {
+      // 1) URL param
+      if (typeof location !== 'undefined' && location.search) {
+        var p = new URLSearchParams(location.search);
+        var q = (p.get('lang') || '').toLowerCase();
+        if (q === 'de' || q === 'en') return q;
+      }
+      // 2) documentElement lang
+      if (typeof document !== 'undefined') {
+        var dl = (document.documentElement && document.documentElement.lang || '').toLowerCase();
+        if (dl === 'de' || dl === 'en') return dl;
+      }
+      // 3) navigator
+      if (typeof navigator !== 'undefined' && navigator.language) {
+        var nl = navigator.language.toLowerCase();
+        if (nl.indexOf('de') === 0) return 'de';
+      }
+    } catch (e) {}
+    return 'de'; // default keeps former behavior
+  })();
+
+  var DICT = {
+    en: {
+      legend_text: 'RFID: ✔ detected, ✖ not detected, – unassigned',
+      live: 'Live',
+      wrong: 'Wrong',
+      wrong_tags: 'Wrong tags:',
+      no_wrong_tags: 'No wrong tags',
+      wrong_tags_tooltip_error: 'Wrong tags (tooltip error)',
+      format: 'Format',
+      recognized: 'recognized',
+      missing: 'missing',
+      per_format: 'Per format',
+      no_assignments: 'No assignments',
+      // cell titles
+      no_rfid_assigned: 'No RFID assigned',
+      tag: 'Tag',
+      detected: 'detected',
+      not_detected: 'not detected',
+      key: 'Key',
+      norm: 'Norm',
+      ws_prefix: 'WebSocket: ',
+    },
+    de: {
+      legend_text: 'RFID: ✔ erkannt, ✖ nicht erkannt, – nicht zugeordnet',
+      live: 'Live',
+      wrong: 'Falsch',
+      wrong_tags: 'Falsche Tags:',
+      no_wrong_tags: 'Keine falschen Tags',
+      wrong_tags_tooltip_error: 'Falsche Tags (Tooltip Fehler)',
+      format: 'Format',
+      recognized: 'erkannt',
+      missing: 'fehlen',
+      per_format: 'Pro Format',
+      no_assignments: 'Keine Zuordnungen',
+      // cell titles
+      no_rfid_assigned: 'Kein RFID zugeordnet',
+      tag: 'Tag',
+      detected: 'erkannt',
+      not_detected: 'nicht erkannt',
+      key: 'Key',
+      norm: 'Norm',
+      ws_prefix: 'WebSocket: ',
+    }
+  };
+  function t(key){
+    var d = DICT[LANG] || DICT.de; // fall back to de to keep legacy semantics
+    return (d && d[key]) || (DICT.en && DICT.en[key]) || key;
+  }
+  function setLanguage(lang){
+    if (lang === 'de' || lang === 'en') {
+      LANG = lang;
+      try { if (document && document.documentElement) document.documentElement.lang = lang; } catch(e){}
+      // refresh UI pieces
+      ensureLegend();
+      updateLegend();
+      updateAll();
+    }
+  }
+  try { window.setLanguage = setLanguage; } catch(e){}
+  try {
+    window.addEventListener('message', function(ev){
+      try{
+        var data = ev && ev.data; if (!data || typeof data !== 'object') return;
+        if (data.type === 'set-language' && (data.lang === 'de' || data.lang === 'en')) setLanguage(data.lang);
+      }catch(e){}
+    });
+  } catch(e){}
   // Utility: debounce
   function debounce(fn, ms) { var t; return function () { var ctx = this, args = arguments; clearTimeout(t); t = setTimeout(function () { fn.apply(ctx, args); }, ms); }; }
   function normalizeTag(t) { return (t || '').toString().trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
@@ -202,24 +292,24 @@
     dot.style.background = '#f0ad4e';
     dot.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.05)';
 
-    var txt = document.createElement('span');
+  var txt = document.createElement('span');
     txt.setAttribute('id', 'somic-rfid-legend-text');
-    txt.textContent = 'RFID: ✔ erkannt, ✖ nicht erkannt, – nicht zugeordnet';
+  txt.textContent = t('legend_text');
 
-    var live = document.createElement('span');
+  var live = document.createElement('span');
     live.setAttribute('id', 'somic-rfid-livecount');
     live.style.opacity = '0.8';
-    live.textContent = '(Live: 0)';
+  live.textContent = '(' + t('live') + ': 0)';
 
-    var wrong = document.createElement('span');
+  var wrong = document.createElement('span');
     wrong.setAttribute('id', 'somic-rfid-wrongcount');
     wrong.style.opacity = '0.8';
-    wrong.textContent = '(Falsch: 0)';
+  wrong.textContent = '(' + t('wrong') + ': 0)';
 
-    var fmtStats = document.createElement('span');
+  var fmtStats = document.createElement('span');
     fmtStats.setAttribute('id', 'somic-rfid-formatstats');
     fmtStats.style.opacity = '0.9';
-    fmtStats.textContent = 'Format: –';
+  fmtStats.textContent = t('format') + ': –';
 
     el.appendChild(dot);
     el.appendChild(txt);
@@ -365,6 +455,9 @@
   function updateLegend() {
     var el = ensureLegend();
     if (!el) return;
+    // Ensure the static legend label is updated for the current language
+    var legendText = el.querySelector('#somic-rfid-legend-text');
+    if (legendText) { legendText.textContent = t('legend_text'); }
     var dot = el.querySelector('#somic-rfid-ws-dot');
     var live = el.querySelector('#somic-rfid-livecount');
     var wrong = el.querySelector('#somic-rfid-wrongcount');
@@ -376,39 +469,39 @@
       else if (wsState === 'error') color = '#d9534f';
       else if (wsState === 'connecting') color = '#f0ad4e';
       dot.style.background = color;
-      dot.title = 'WebSocket: ' + wsState;
+      dot.title = t('ws_prefix') + wsState;
     }
-    if (live) { live.textContent = '(Live: ' + (liveSet ? liveSet.size : 0) + ')'; }
+    if (live) { live.textContent = '(' + t('live') + ': ' + (liveSet ? liveSet.size : 0) + ')'; }
     if (wrong) {
       var wdetails = computeWrongDetails();
-      wrong.textContent = '(Falsch: ' + (wdetails ? wdetails.length : 0) + ')';
+      wrong.textContent = '(' + t('wrong') + ': ' + (wdetails ? wdetails.length : 0) + ')';
       // Build tooltip lines "<formatKey or (unbekannt)> • …<last6>"
       try {
         var lines = [];
         for (var i = 0; i < Math.min(wdetails.length, 30); i++) {
           var d = wdetails[i];
-          var keyLabel = (d.keys && d.keys.length) ? d.keys.join(', ') : '(unbekannt)';
+          var keyLabel = (d.keys && d.keys.length) ? d.keys.join(', ') : '(?)';
           var raw = d.tagRaw || d.tagNorm || '';
           var last6 = raw ? raw.toString().slice(-6) : '';
           lines.push(keyLabel + ' • …' + last6);
         }
         if (wdetails.length > 30) lines.push('…');
-        wrong.title = lines.length ? ('Falsche Tags:\n' + lines.join('\n')) : 'Keine falschen Tags';
-      } catch (e) { wrong.title = 'Falsche Tags (Tooltip Fehler)'; }
+        wrong.title = lines.length ? (t('wrong_tags') + '\n' + lines.join('\n')) : t('no_wrong_tags');
+      } catch (e) { wrong.title = t('wrong_tags_tooltip_error'); }
     }
     if (fmtStats) {
       var stats = computeFormatStats();
       var c = stats.current || { recognized: 0, total: 0, missing: 0, name: '' };
-      fmtStats.textContent = 'Format: ' + c.recognized + '/' + c.total + ' erkannt · ' + c.missing + '/' + c.total + ' fehlen';
+      fmtStats.textContent = t('format') + ': ' + c.recognized + '/' + c.total + ' ' + t('recognized') + ' · ' + c.missing + '/' + c.total + ' ' + t('missing');
       // Tooltip: per-format breakdown
       try {
         var lines2 = [];
         for (var k = 0; k < Math.min(stats.all.length, 40); k++) {
           var r = stats.all[k];
-          lines2.push(r.name + ': ' + r.recognized + '/' + r.total + ' erkannt · ' + r.missing + '/' + r.total + ' fehlen');
+          lines2.push(r.name + ': ' + r.recognized + '/' + r.total + ' ' + t('recognized') + ' · ' + r.missing + '/' + r.total + ' ' + t('missing'));
         }
         if (stats.all.length > 40) lines2.push('…');
-        fmtStats.title = lines2.length ? ('Pro Format:\n' + lines2.join('\n')) : 'Keine Zuordnungen';
+        fmtStats.title = lines2.length ? (t('per_format') + ':\n' + lines2.join('\n')) : t('no_assignments');
       } catch (e) { fmtStats.title = ''; }
     }
   }
@@ -465,7 +558,12 @@
       var symbol = !tag ? '–' : (seen ? '✔' : '✖');
       td.textContent = symbol;
       var kinfo = td.getAttribute('data-format-key') || '';
-      td.title = !tag ? ('Kein RFID zugeordnet | Key=' + kinfo) : (seen ? ('Tag ' + tag + ' erkannt | Key=' + kinfo + ' | Norm=' + norm) : ('Tag ' + tag + ' nicht erkannt | Key=' + kinfo + ' | Norm=' + norm));
+      td.title = !tag
+        ? (t('no_rfid_assigned') + ' | ' + t('key') + '=' + kinfo)
+        : (seen
+          ? (t('tag') + ' ' + tag + ' ' + t('detected') + ' | ' + t('key') + '=' + kinfo + ' | ' + t('norm') + '=' + norm)
+          : (t('tag') + ' ' + tag + ' ' + t('not_detected') + ' | ' + t('key') + '=' + kinfo + ' | ' + t('norm') + '=' + norm)
+        );
       td.style.color = tag ? (seen ? '#0a7a15' : '#b30000') : '#666';
       // Apply background color based on state
       try {

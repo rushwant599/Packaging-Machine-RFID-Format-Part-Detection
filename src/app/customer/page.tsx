@@ -2,6 +2,7 @@
 import Header from "@/components/Header";
 import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { apiClient, BACKEND_URL } from "@/lib/api-client";
+import { useI18n } from "@/lib/i18n";
 
 // -------------------- Typdefinitionen --------------------
 interface RowMeta {
@@ -176,6 +177,7 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
 }
 
 export default function CustomerPage() {
+  const { t, lang } = useI18n();
   const { isMobile, isTablet, width } = useViewport();
   // Fetch color from config
   const [color, setColor] = React.useState<string>("#1976d2");
@@ -327,13 +329,13 @@ export default function CustomerPage() {
         setSteps(prepareSteps(rowsMeta, STEP_FONT_SIZE));
         setCurrentStep(0);
       } catch (e) {
-        setStepsError(e instanceof Error ? e.message : 'Fehler beim Laden der Schritt-Liste');
+        setStepsError(e instanceof Error ? e.message : t('steps_load_error'));
       } finally {
         setStepsLoading(false);
       }
     };
     loadSteps();
-  }, [STEP_FONT_SIZE]);
+  }, [STEP_FONT_SIZE, t]);
 
   // Formate laden
   useEffect(() => {
@@ -346,11 +348,11 @@ export default function CustomerPage() {
         setFormats(fmts);
         setFormatNames(Object.keys(fmts));
       } catch (e) {
-        setFormatError(e instanceof Error ? e.message : 'Unbekannter Fehler');
+        setFormatError(e instanceof Error ? e.message : t('unknown_error'));
       } finally { setFormatLoading(false); }
     };
     loadFormats();
-  }, []);
+  }, [t]);
 
   // Format-Detaildaten (inkl. valueIndexMap) laden sobald ein Format gewählt ist
   const [formatDetail, setFormatDetail] = React.useState<FormatDetail | null>(null);
@@ -637,21 +639,21 @@ export default function CustomerPage() {
   const onFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const files = e.target.files;
-      if (!files || files.length === 0) { setUploadMsg('Keine Datei gewählt.'); return; }
+      if (!files || files.length === 0) { setUploadMsg(t('no_file_selected')); return; }
       const file = files[0];
-      if (!uploadPartId) { setUploadMsg('Kein Formatteil ausgewählt.'); return; }
+      if (!uploadPartId) { setUploadMsg(t('no_format_part_selected')); return; }
       const part = sanitizePart(uploadPartId);
       const form = new FormData();
       form.append('file', file);
-      setUploadMsg('Lade hoch…');
+      setUploadMsg(t('uploading'));
       const resp = await fetch(`${BACKEND_URL}/api/pictures/${encodeURIComponent(part)}`, { method: 'POST', body: form });
       if (!resp.ok) {
         const txt = await resp.text();
-        throw new Error(`Upload fehlgeschlagen (${resp.status}): ${txt || resp.statusText}`);
+        throw new Error(`${t('upload_failed_prefix')} (${resp.status}): ${txt || resp.statusText}`);
       }
       const json = await resp.json() as { success?: boolean; filename?: string };
-      if (!json?.success || !json.filename) throw new Error('Unerwartete Antwort vom Server');
-      setUploadMsg(`Upload erfolgreich: ${json.filename}`);
+      if (!json?.success || !json.filename) throw new Error(t('unexpected_server_response'));
+      setUploadMsg(`${t('upload_success')} ${json.filename}`);
       // Bildliste aktualisieren (zeige neuestes Bild)
       picturesCacheRef.current.set(part, [json.filename]);
       // Wenn aktueller Step zum gleichen Part gehört, aktualisieren
@@ -663,19 +665,19 @@ export default function CustomerPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setUploadMsg(`Fehler: ${msg}`);
+      setUploadMsg(`${t('error_prefix')} ${msg}`);
     }
-  }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart, derivePicturePartKey]);
+  }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart, derivePicturePartKey, t]);
 
   const toggleCamera = useCallback(async () => {
     try {
-      if (mediaStream) { setUploadMsg('Kamera bereits aktiv.'); return; }
+      if (mediaStream) { setUploadMsg(t('camera_already_active')); return; }
       if (!isSecureForCamera()) {
-        setUploadMsg('Kamera benötigt HTTPS oder localhost. Bitte die Seite über https://<ip>:3000 öffnen.');
+        setUploadMsg(t('camera_requires_https'));
         return;
       }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setUploadMsg('Kamera API nicht verfügbar.');
+        setUploadMsg(t('camera_api_unavailable'));
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
@@ -683,39 +685,39 @@ export default function CustomerPage() {
         (videoRef.current as HTMLVideoElement).srcObject = stream;
       }
       setMediaStream(stream);
-      setUploadMsg('Kamera gestartet.');
+      setUploadMsg(t('camera_started'));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setUploadMsg(`Kamera-Fehler: ${msg}`);
+      setUploadMsg(`${t('camera_error')}: ${msg}`);
     }
-  }, [mediaStream, isSecureForCamera]);
+  }, [mediaStream, isSecureForCamera, t]);
 
   const takeSnapshot = useCallback(async () => {
     try {
-      if (!mediaStream || !videoRef.current) { setUploadMsg('Kamera nicht aktiv.'); return; }
-      if (!uploadPartId) { setUploadMsg('Kein Formatteil ausgewählt.'); return; }
+      if (!mediaStream || !videoRef.current) { setUploadMsg(t('camera_not_active')); return; }
+      if (!uploadPartId) { setUploadMsg(t('no_format_part_selected')); return; }
       const video = videoRef.current as HTMLVideoElement;
       const canvas = canvasRef.current as HTMLCanvasElement | null;
-      if (!canvas) { setUploadMsg('Kein Canvas verfügbar.'); return; }
+      if (!canvas) { setUploadMsg(t('no_canvas_available')); return; }
       const w = video.videoWidth || 1280;
       const h = video.videoHeight || 720;
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
-      if (!ctx) { setUploadMsg('Canvas Kontext fehlt.'); return; }
+      if (!ctx) { setUploadMsg(t('canvas_context_missing')); return; }
       ctx.drawImage(video, 0, 0, w, h);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
       const part = sanitizePart(uploadPartId);
       const form = new FormData();
       form.append('image_base64', dataUrl);
-      setUploadMsg('Speichere Foto…');
+      setUploadMsg(t('saving_photo'));
       const resp = await fetch(`${BACKEND_URL}/api/pictures/${encodeURIComponent(part)}`, { method: 'POST', body: form });
       if (!resp.ok) {
         const txt = await resp.text();
-        throw new Error(`Upload fehlgeschlagen (${resp.status}): ${txt || resp.statusText}`);
+        throw new Error(`${t('upload_failed_prefix')} (${resp.status}): ${txt || resp.statusText}`);
       }
       const json = await resp.json() as { success?: boolean; filename?: string };
-      if (!json?.success || !json.filename) throw new Error('Unerwartete Antwort vom Server');
-      setUploadMsg(`Foto gespeichert: ${json.filename}`);
+      if (!json?.success || !json.filename) throw new Error(t('unexpected_server_response'));
+      setUploadMsg(`${t('photo_saved')}: ${json.filename}`);
       // Update pictures
       picturesCacheRef.current.set(part, [json.filename]);
       const curKey = derivePicturePartKey(stepsWithStatus[currentStep]);
@@ -725,9 +727,9 @@ export default function CustomerPage() {
       stopCamera();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setUploadMsg(`Fehler: ${msg}`);
+      setUploadMsg(`${t('error_prefix')} ${msg}`);
     }
-  }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera, derivePicturePartKey]);
+  }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera, derivePicturePartKey, t]);
 
   // Separater Satz für Statistik: im diffMode immer komplette Ziel-Format-Injektion statt gefilterter Unterschiede
   const statsStepsWithStatus: Step[] = React.useMemo(() => {
@@ -772,6 +774,7 @@ export default function CustomerPage() {
   const totalSteps = stepsWithStatus.length;
   // Bild-Preview Overlay
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const htmlIframeRef = useRef<HTMLIFrameElement | null>(null);
   // Dynamische Max-Höhe für Inline-Bild (kein Scroll nötig)
   const inlineImageMaxHeight = React.useMemo(() => {
     if (width < 480) return '26vh';
@@ -785,6 +788,19 @@ export default function CustomerPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Keep iframe language in sync when toggled
+  useEffect(() => {
+    try {
+      type IframeWin = Window & { setLanguage?: (l: string) => void };
+      const win = htmlIframeRef.current?.contentWindow as IframeWin | null;
+      if (win?.setLanguage) {
+        win.setLanguage(lang);
+      } else if (htmlIframeRef.current?.contentWindow) {
+        htmlIframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
+      }
+    } catch { /* ignore */ }
+  }, [lang]);
 
   // --- Bilder für aktuellen Schritt ---
   const [currentPictures, setCurrentPictures] = useState<string[]>([]);
@@ -856,14 +872,14 @@ export default function CustomerPage() {
         {/* Steuerleiste */}
         <div style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e5e5e5', background: '#fafafa', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>Schritt-für-Schritt Anleitung</h2>
+            <h2 style={{ fontSize: '.9rem', fontWeight: 600, margin: 0, letterSpacing: '.03em', color: '#222' }}>{t('step_by_step')}</h2>
             <button onClick={() => setShowSteps(s => !s)} style={{ fontSize: '.65rem', padding: '4px 8px', border: '1px solid #bbb', background: '#fff', borderRadius: 4, cursor: 'pointer', color: '#000' }}>
-              {showSteps ? 'Anleitung verbergen' : 'Anleitung anzeigen'}
+              {showSteps ? t('hide_guide') : t('show_guide')}
             </button>
           </div>
-          {showSteps && stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Lade Schritte…</div>}
+          {showSteps && stepsLoading && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>{t('loading_steps')}</div>}
           {showSteps && stepsError && <div style={{ fontSize: '.75rem', color: '#b00000', marginTop: 4 }}>{stepsError}</div>}
-          {showSteps && !stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>Keine Schritte gefunden.</div>}
+          {showSteps && !stepsLoading && !stepsError && steps.length === 0 && <div style={{ fontSize: '.75rem', color: '#555', marginTop: 4 }}>{t('no_steps_found')}</div>}
         </div>
         {/* Content Bereich der restliche Höhe füllt */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: showSteps ? '8px 10px' : 0, gap: showSteps ? 8 : 0, overflow: 'hidden' }}>
@@ -872,46 +888,46 @@ export default function CustomerPage() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, position: 'relative', flexShrink: 0, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
                 {!diffMode && (
                   <>
-                    <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Format:</label>
+                    <label htmlFor="formatSelect" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('format')}</label>
                     <select id="formatSelect"
                       value={selectedFormat || ''}
                       onChange={e => { setSelectedFormat(e.target.value || null); setCurrentStep(0); }}
                       style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}
                     >
-                      <option value=''>-- wählen --</option>
+                      <option value=''>{t('choose_placeholder')}</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
-                    {selectedFormat && <button title="Format zurücksetzen" onClick={() => { setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding: '4px 6px', background: '#f4f4f4', color: '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>Reset</button>}
+                    {selectedFormat && <button title={t('reset_format_title')} onClick={() => { setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding: '4px 6px', background: '#f4f4f4', color: '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>{t('reset')}</button>}
                   </>
                 )}
                 {diffMode && (
                   <>
-                    <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Von:</label>
+                    <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('from')}</label>
                     <select id="fromFormat" value={fromFormat || ''} onChange={e => { setFromFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
-                      <option value=''>-- Quelle --</option>
+                      <option value=''>{t('source_placeholder')}</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
-                    <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>Nach:</label>
+                    <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('to')}</label>
                     <select id="toFormat" value={toFormat || ''} onChange={e => { setToFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
-                      <option value=''>-- Ziel --</option>
+                      <option value=''>{t('target_placeholder')}</option>
                       {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </>
                 )}
                 <button
-                  title="Wechsel-Modus: Zeigt nur Unterschiede von Quelle zu Ziel (alle Linien bleiben)"
+                  title={t('diff_mode_title')}
                   onClick={() => { setDiffMode(m => !m); setCurrentStep(0); }}
                   style={{ fontSize: '.65rem', padding: '4px 6px', background: diffMode ? '#222' : '#f4f4f4', color: diffMode ? '#fff' : '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>
-                  {diffMode ? 'Wechsel-Modus an' : 'Wechsel-Modus aus'}
+                  {diffMode ? t('diff_mode_on') : t('diff_mode_off')}
                 </button>
                 {diffMode && fromFormat && toFormat && fromFormat === toFormat && (
-                  <span style={{ fontSize: '.6rem', color: '#b00' }}>Bitte unterschiedliche Formate wählen</span>
+                  <span style={{ fontSize: '.6rem', color: '#b00' }}>{t('choose_different_formats')}</span>
                 )}
-                {formatLoading && <span style={{ fontSize: '.65rem', color: '#444' }}>lädt…</span>}
+                {formatLoading && <span style={{ fontSize: '.65rem', color: '#444' }}>{t('loading_short')}</span>}
                 {formatError && <span style={{ fontSize: '.65rem', color: '#b00' }}>{formatError}</span>}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 14, alignItems: 'center', fontSize: '.65rem', fontWeight: 600, color: '#222', flexWrap: 'wrap' }}>
-                  <span title="Erkannte vs. zugeordnete Formatteile">{rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} Formatteile erkannt</span>
-                  <span title="Erkannte Tags ohne Zuweisung" style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} falsche Formatteile erkannt</span>
+                  <span title={t('recognized_vs_assigned')}>{rfidStats.recognizedAssigned}/{rfidStats.assignedTotal} {t('format_parts_recognized')}</span>
+                  <span title={t('recognized_tags_without_assignment')} style={{ color: rfidStats.foreignCount ? '#b30000' : '#228822' }}>{rfidStats.foreignCount} {t('foreign_format_parts_detected')}</span>
                 </div>
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -991,7 +1007,7 @@ export default function CustomerPage() {
                                   {changed ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                       <span>{c}</span>
-                                      {fromVal && <span style={{ fontSize: '0.55rem', color: '#b00', fontWeight: 500 }}>alt: {fromVal}</span>}
+                                      {fromVal && <span style={{ fontSize: '0.55rem', color: '#b00', fontWeight: 500 }}>{t('old_value_prefix')} {fromVal}</span>}
                                     </div>
                                   ) : c}
                                 </td>;
@@ -1006,9 +1022,9 @@ export default function CustomerPage() {
                                   bg = rs.seen ? '#99e47cff' : '#ec7e7eff';
                                 }
                                 let titleText: string;
-                                if (!rs.tagId) titleText = `Kein RFID zugeordnet | Key=${rs.keyTried}`;
-                                else if (rs.seen) titleText = `Tag ${rs.tagId} erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
-                                else titleText = `Tag ${rs.tagId} nicht erkannt | Key=${rs.keyTried} | Norm=${rs.tagIdNorm}`;
+                                if (!rs.tagId) titleText = `${t('no_rfid_assigned')} | ${t('key')}=${rs.keyTried}`;
+                                else if (rs.seen) titleText = `${t('tag')} ${rs.tagId} ${t('detected')} | ${t('key')}=${rs.keyTried} | ${t('norm')}=${rs.tagIdNorm}`;
+                                else titleText = `${t('tag')} ${rs.tagId} ${t('not_detected')} | ${t('key')}=${rs.keyTried} | ${t('norm')}=${rs.tagIdNorm}`;
                                 return (
                                   <td
                                     style={{
@@ -1032,7 +1048,7 @@ export default function CustomerPage() {
                         </table>
                       </div>
                       {!compactTable && tableScale < 1 && (
-                        <div style={{ position: 'absolute', right: 4, bottom: 4, background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: '.55rem', letterSpacing: '.05em' }}>Skaliert {Math.round(tableScale * 100)}%</div>
+                        <div style={{ position: 'absolute', right: 4, bottom: 4, background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '2px 6px', borderRadius: 4, fontSize: '.55rem', letterSpacing: '.05em' }}>{t('scaled')} {Math.round(tableScale * 100)}%</div>
                       )}
                     </div>
                   )}
@@ -1056,10 +1072,10 @@ export default function CustomerPage() {
                         )}
                       </div>
                       */}
-                        {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color: '#555' }}>Lade Bild…</div>}
+                        {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color: '#555' }}>{t('loading_image')}</div>}
                         {!pictureLoading && currentPictures.length > 0 && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222' }}>Bild</div>
+                            <div style={{ fontSize: STEP_FONT_SIZE, fontWeight: 600, color: '#222' }}>{t('image')}</div>
                             <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-start' }}>
                               {currentPictures.map(fn => {
                                 const src = `${BACKEND_URL}/pictures/${encodeURIComponent(fn)}`;
@@ -1086,7 +1102,7 @@ export default function CustomerPage() {
                           </div>
                         )}
                         {!pictureLoading && currentPictures.length === 0 && (
-                          <div style={{ fontSize: '.55rem', color: '#777' }}>Kein Bild vorhanden</div>
+                          <div style={{ fontSize: '.55rem', color: '#777' }}>{t('no_image_available')}</div>
                         )}
                       </div>
                     );
@@ -1098,9 +1114,9 @@ export default function CustomerPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexShrink: 0 }}>
-                <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>Zurück</button>
-                <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>Weiter</button>
-                <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>Schritt {currentStep + 1} / {totalSteps}</div>
+                <button onClick={() => goto(-1)} disabled={!hasPrev} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasPrev ? '#222' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasPrev ? 'pointer' : 'not-allowed' }}>{t('back')}</button>
+                <button onClick={() => goto(1)} disabled={!hasNext} style={{ padding: '6px 12px', fontSize: STEP_FONT_SIZE, background: hasNext ? '#0069d9' : '#999', color: '#fff', border: 'none', borderRadius: 4, cursor: hasNext ? 'pointer' : 'not-allowed' }}>{t('next')}</button>
+                <div style={{ fontSize: STEP_FONT_SIZE, color: '#111', marginLeft: 'auto', fontWeight: 500 }}>{t('step')} {currentStep + 1} / {totalSteps}</div>
               </div>
               <input type="range" min={0} max={Math.max(totalSteps - 1, 0)} value={currentStep} onChange={e => setCurrentStep(Number(e.target.value))} style={{ width: '100%', marginTop: 6 }} />
             </div>
@@ -1109,8 +1125,20 @@ export default function CustomerPage() {
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
               <iframe
                 src={fileUrl}
-                title="Externe HTML"
+                title={t('external_html')}
                 style={{ width: '100%', flex: 1, border: 'none', background: '#fff', display: 'block', overflow: 'auto' }}
+                ref={htmlIframeRef}
+                onLoad={() => {
+                  try {
+                    type IframeWin = Window & { setLanguage?: (l: string) => void };
+                    const win = htmlIframeRef.current?.contentWindow as IframeWin | null;
+                    if (win?.setLanguage) {
+                      win.setLanguage(lang);
+                    } else if (htmlIframeRef.current?.contentWindow) {
+                      htmlIframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
+                    }
+                  } catch { /* ignore */ }
+                }}
               />
             </div>
           )}
@@ -1131,10 +1159,10 @@ export default function CustomerPage() {
               type="button"
               onClick={() => setPreviewImage(null)}
               style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, fontSize: '.7rem', cursor: 'pointer' }}
-            >Schließen ✕</button>
+            >{t('close')} ✕</button>
             <img
               src={previewImage}
-              alt="Vorschau"
+              alt={t('preview')}
               style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: 6, boxShadow: '0 4px 18px rgba(0,0,0,0.4)' }}
             />
           </div>
@@ -1149,20 +1177,20 @@ export default function CustomerPage() {
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
         >
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 8, padding: 16, minWidth: 280, maxWidth: '90vw', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', color: '#000' }}>Upload Bild{uploadPartId ? ` für ${uploadPartId}` : ''}</h3>
+            <h3 style={{ margin: 0, fontSize: '1rem', color: '#000' }}>{t('upload_image')}{uploadPartId ? ` ${t('for')} ${uploadPartId}` : ''}</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileSelected} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Datei wählen</button>
-              <button type="button" onClick={toggleCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{mediaStream ? 'Kamera läuft' : 'Kamera'}</button>
-              <button type="button" onClick={() => closeUpload()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Schließen</button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{t('choose_file')}</button>
+              <button type="button" onClick={toggleCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{mediaStream ? t('camera_running') : t('camera')}</button>
+              <button type="button" onClick={() => closeUpload()} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{t('close')}</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <video ref={videoRef} autoPlay playsInline style={{ display: mediaStream ? 'block' : 'none', maxWidth: '80vw', maxHeight: '40vh', border: '1px solid #ddd', borderRadius: 4 }} />
               <canvas ref={canvasRef} style={{ display: 'none' }} />
               {mediaStream && (
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={takeSnapshot} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Foto aufnehmen</button>
-                  <button type="button" onClick={stopCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>Kamera stoppen</button>
+                  <button type="button" onClick={takeSnapshot} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{t('take_photo')}</button>
+                  <button type="button" onClick={stopCamera} style={{ padding: '6px 10px', border: '1px solid #bbb', borderRadius: 4, background: '#f4f4f4', cursor: 'pointer', color: '#000' }}>{t('stop_camera')}</button>
                 </div>
               )}
             </div>

@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import argparse
 import asyncio
 import logging
 from collections import deque
@@ -8,26 +6,30 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Deque, List, Optional, TYPE_CHECKING, Any
 
-try:  # pragma: no cover - Import zur Laufzeit optional
-    from asyncua import Client, ua  # type: ignore
-except ImportError:  # pragma: no cover
-    Client = Any  # type: ignore
-    ua = Any  # type: ignore
+try:
+    from asyncua import Client, ua
+except ImportError:
+    Client = Any
+    ua = Any
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class EventBytesRecord:
-    timestamp: str  # ISO UTC
+    timestamp: str
     payload: str
 
 
-class _BytesOnlyHandler:  # interne Handler-Klasse die asyncua Subscription verwendet
+# OPC UA Event Bytes Listener
+class _BytesOnlyHandler:
+    
+    # Initialization
     def __init__(self, on_event: Callable[[str], Awaitable[None]] | Callable[[str], None]):
         self._on_event = on_event
 
-    async def event_notification(self, events):  # von asyncua gerufen
+    # Event Notification
+    async def event_notification(self, events): 
         if not isinstance(events, (list, tuple)):
             events = [events]
         for ev in events:
@@ -36,13 +38,13 @@ class _BytesOnlyHandler:  # interne Handler-Klasse die asyncua Subscription verw
                 try:
                     res = self._on_event(payload)
                     if asyncio.iscoroutine(res):
-                        await res  # type: ignore
-                except Exception:  # pragma: no cover - defensive
+                        await res
+                except Exception:
                     logger.exception("Fehler im Event Callback")
 
+    # Extrahiere den Payload aus dem Event
     @staticmethod
     def _extract_payload(ev) -> Optional[str]:
-        # Sammle potentielle EventFields
         candidates = []
         if hasattr(ev, "EventFields"):
             try:
@@ -50,7 +52,6 @@ class _BytesOnlyHandler:  # interne Handler-Klasse die asyncua Subscription verw
             except Exception:
                 candidates = []
         if not candidates:
-            # Fallback: alle public Attribute
             for k, v in ev.__dict__.items():
                 if k.startswith("_"):
                     continue
@@ -80,8 +81,9 @@ class _BytesOnlyHandler:  # interne Handler-Klasse die asyncua Subscription verw
                 return s
         return None
 
-
+# API
 class OPCUAEventBytesListener:
+    # Initialization
     def __init__(
         self,
         server_url: str,
@@ -95,7 +97,6 @@ class OPCUAEventBytesListener:
         self.publishing_interval_ms = publishing_interval_ms
         self.max_events = max_events
         self.suppress_asyncua_logs = suppress_asyncua_logs
-        # Typ bewusst als Any, da asyncua optional ist
         self._client: Any = None
         self._subscription = None
         self._events: Deque[EventBytesRecord] = deque(maxlen=max_events)
@@ -103,23 +104,24 @@ class OPCUAEventBytesListener:
         self._task: Optional[asyncio.Task] = None
         self._running = asyncio.Event()
 
-    # Öffentliche API
+    # Add callback
     def add_callback(
         self, cb: Callable[[EventBytesRecord], None] | Callable[[EventBytesRecord], Awaitable[None]]
     ):
         self._callbacks.append(cb)
 
+    # Get stored events
     def get_events(self, limit: Optional[int] = None) -> List[EventBytesRecord]:
         if limit is None or limit >= len(self._events):
             return list(self._events)
         return list(self._events)[-limit:]
 
+    # Start listener
     async def start(self):
         if self._task and not self._task.done():
             logger.warning("EventListener bereits gestartet")
             return
         if self.suppress_asyncua_logs:
-            # Unterdrücke laute Detail-Logs der Bibliothek (PublishResult etc.)
             for name, level in [
                 ("asyncua", logging.WARNING),
                 ("asyncua.common.subscription", logging.ERROR),
@@ -128,6 +130,7 @@ class OPCUAEventBytesListener:
         self._running.set()
         self._task = asyncio.create_task(self._run(), name="OPCUAEventBytesListener")
 
+    # Stop listener
     async def stop(self):
         self._running.clear()
         if self._task:
@@ -138,10 +141,11 @@ class OPCUAEventBytesListener:
                 pass
         await self._cleanup()
 
+    # Check if listener is running
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done() and self._running.is_set()
 
-    # Intern
+    # Main Event-Loop
     async def _run(self):
         if Client is None:
             logger.error("asyncua nicht installiert - EventListener deaktiviert")
@@ -162,7 +166,6 @@ class OPCUAEventBytesListener:
                     except Exception as e:
                         logger.warning(f"Explizite EventType Subscription fehlgeschlagen ({e}) - fallback any event")
                         await sub.subscribe_events(server_node)
-                    # idle loop
                     while self._running.is_set():
                         await asyncio.sleep(1)
             except asyncio.CancelledError:
@@ -173,6 +176,7 @@ class OPCUAEventBytesListener:
             finally:
                 await self._cleanup()
 
+    # Cleanup
     async def _cleanup(self):
         if self._subscription:
             try:
@@ -182,57 +186,14 @@ class OPCUAEventBytesListener:
             self._subscription = None
         self._client = None
 
+    # Internal event payload handler
     async def _on_raw_payload(self, payload: str):
         record = EventBytesRecord(timestamp=datetime.now(timezone.utc).isoformat(), payload=payload)
         self._events.append(record)
-        # Callbacks
         for cb in list(self._callbacks):
             try:
                 res = cb(record)
                 if asyncio.iscoroutine(res):
-                    await res  # type: ignore
-            except Exception:  # pragma: no cover
+                    await res
+            except Exception:
                 logger.exception("Callback Fehler ignoriert")
-
-
-# --- CLI Support (optional) -------------------------------------------------
-
-def _parse_args():  # pragma: no cover - nur bei direkter CLI Nutzung
-    parser = argparse.ArgumentParser(description="OPC UA Event Bytes Listener (integrierte Version)")
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--event-type", required=True, help="NodeId des EventType z.B. ns=4;i=6050")
-    parser.add_argument("--interval", type=int, default=500, help="Publishing Interval ms")
-    parser.add_argument("--max-events", type=int, default=1000)
-    return parser.parse_args()
-
-
-async def _cli_async(args):  # pragma: no cover
-    listener = OPCUAEventBytesListener(
-        server_url=args.url,
-        event_type=args.event_type,
-        publishing_interval_ms=args.interval,
-        max_events=args.max_events,
-    )
-
-    async def print_cb(ev: EventBytesRecord):
-        print(f"{ev.timestamp} {ev.payload}", flush=True)
-
-    listener.add_callback(print_cb)
-    await listener.start()
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await listener.stop()
-
-
-def _cli_entry():  # pragma: no cover
-    logging.basicConfig(level=logging.INFO)
-    args = _parse_args()
-    asyncio.run(_cli_async(args))
-
-
-if __name__ == "__main__":  # pragma: no cover
-    _cli_entry()

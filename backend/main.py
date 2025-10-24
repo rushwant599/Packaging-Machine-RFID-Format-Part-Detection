@@ -16,8 +16,6 @@ from dotenv import load_dotenv
 import json
 
 # Local modules
-from opc_client import OPCUAManager
-from rfu_ivsingle_inventory import AsyncRFUInventoryClient, RFUInventoryError
 from format_parser import FormatDataManager
 from html_table_parser import MainTableRowExtractor
 from simple_assignment_db import SimpleAssignmentManager
@@ -46,101 +44,45 @@ logger.info(f"  - ../.env.docker: {Path('../.env.docker').exists()}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-
-def log_startup_banner():
-    banner = r"""
- ::::::::   ::::::::  ::::    ::::  ::::::::::: ::::::::       :::     :::   ::: ::::    ::: :::    ::: 
-:+:    :+: :+:    :+: +:+:+: :+:+:+     :+:    :+:    :+:      :+:     :+:   :+: :+:+:   :+: :+:    :+: 
-+:+        +:+    +:+ +:+ +:+:+ +:+     +:+    +:+             +:+      +:+ +:+  :+:+:+  +:+  +:+  +:+  
-+#++:++#++ +#+    +:+ +#+  +:+  +#+     +#+    +#+             +#+       +#++:   +#+ +:+ +#+   +#++:+   
-       +#+ +#+    +#+ +#+       +#+     +#+    +#+             +#+        +#+    +#+  +#+#+#  +#+  +#+  
-#+#    #+# #+#    #+# #+#       #+#     #+#    #+#    #+#      #+#        #+#    #+#   #+#+# #+#    #+# 
- ########   ########  ###       ### ########### ########       ########## ###    ###    #### ###    ### 
-                      ..                                      
-                    --..            .:.                     
-                    -*+.           .*=:                     
-                    -#@+           +@=..                    
-                    --%@*.       .-%@:                      
-                    ::-#@%-.    .=+#+#:                     
-                    .-.-*===:  .-+*#@#%-.                   
-                     =.:*=:-==-=-=+=#%*#-.                  
-                    .+++++=+:++-=---*@@+=-.                 
-                  .-=+---:-=....:---%@+:=-:                
-               .:+==-.:+.+--:..::...-*-:::=:.               
-              .-#+=-..#=-*=:.:..:....=-===#+.               
-              .++:...=::+=-......:...::::+%#=..             
-             .:++=...-#=-=--:..-+=..-.:.=#*=-*+.            
-             .+--....=+-:.:..::...=-.::.-#=-+++=.           
-             -:.:::-..:..+-.-:.=:..-:..::-+=-...*:.         
-           .+#--===:.:=+:.:.... .-..=.+.:=+..::.-*-.        
-          .:***%*=-::=:=---==-=:-:.:.-+::--.::=*=+*=.       
-          ..-+++--=-:--###++**+=-+.=:.=:++::..::::.:..      
-           ..:=+*++=+***-----:--:+...:++*-.:..:..:-=..      
-             ..:+:::::::=+=:.....=--*+#+:.:-:...=+:..       
-                 ......#:..:##*+==+=...-=.:.:.:.....        
-                       .+=..-=-:..:-:.:=-*-.....:...        
-                        :*+.:.........: ...:.:......        
-                         ..=...-:.#.-*......::..            
-                          ..    ......     
-    """
-    logger.warning("\n" + banner)
 
 # Get configuration from environment
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8001"))
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 
-# OPC UA Configuration
-OPC_UA_ENABLED = os.getenv("OPC_UA_ENABLED", "false").lower() == "true"
-OPC_UA_SERVER_URL = os.getenv("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
-OPC_UA_NODE_ID = os.getenv("OPC_UA_NODE_ID", "ns=2;i=1")
-
+# Basic process configuration logging
 logger.info(f"Configuration loaded:")
 logger.info(f"  - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
-logger.info(f"  - OPC UA Enabled: {OPC_UA_ENABLED}")
-logger.info(f"  - OPC UA Server: {OPC_UA_SERVER_URL}")
-logger.info(f"  - OPC UA Node: {OPC_UA_NODE_ID}")
 
 # Initialize managers
 opc_manager = None
-# rfid_opc_manager deprecated (removed functionality)
-rfid_opc_manager = None
 format_manager = None
 assignment_manager = None
-# OPC UA Event Listener (Bytes Payload)
 opc_event_listener: OPCUAEventBytesListener | None = None
 
 # Live Zeitfenster-Puffer für extrahierte Hex IDs aus Event-Bytes
 # Struktur: { hex_id: {"first_seen": ts, "last_seen": ts, "count": n} }
 _live_event_hex_ids: dict[str, dict] = {}
 
-# Live RFID Inventory (Direct Socket) State
-async_rfu_client: AsyncRFUInventoryClient | None = None
-_rfid_poll_task = None
-_current_rfid_full: list[dict] = []  # letzter vollständiger Satz Tags (detailliert)
-_current_rfid_epcs: list[str] = []   # nur EPC Strings
-_last_rfid_timestamp: float | None = None
-_current_rfid_seen: dict[str, dict] = {}  # per EPC: aggregation with first_seen, last_seen, read_count, last_rssi, last_power, antenna
-_rfid_retention_sec: float = 10.0
-_live_event_broadcast_task = None
-
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
+    # Connect a new WebSocket client
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
 
+    # Disconnect a WebSocket client
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
 
+    # Broadcast a value change to all connected clients
     async def broadcast_value_change(self, data: dict):
         """Broadcast value change to all connected clients"""
         if not self.active_connections:
@@ -165,8 +107,8 @@ class ConnectionManager:
         for conn in disconnected:
             self.disconnect(conn)
 
+    # Broadcast a raw JSON payload (already containing type field).
     async def broadcast_json(self, payload: dict):
-        """Broadcast a raw JSON payload (already containing type field)."""
         if not self.active_connections:
             return
         message = json.dumps(payload)
@@ -186,10 +128,9 @@ websocket_manager = ConnectionManager()
 # FastAPI lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, opc_event_listener
-    
+    global opc_manager, rfid_opc_manager, format_manager, assignment_manager, opc_event_listener
+    global opc_manager, format_manager, assignment_manager, opc_event_listener
     # Startup
-    log_startup_banner()
     logger.info("Starting RFID Parts Backend...")
     
     # Initialize Simple Assignment Database
@@ -198,7 +139,7 @@ async def lifespan(app: FastAPI):
     assignment_manager = SimpleAssignmentManager(str(data_dir / "format_assignments.db"))
     await assignment_manager.initialize()
     
-    # OPC UA Manager: Starte automatisch, wenn in Config aktiviert
+    #  PLC OPC UA Manager: Starte automatisch, wenn in Config aktiviert
     from config_manager import load_config
     config = load_config()
     opc_manager = None
@@ -213,13 +154,7 @@ async def lifespan(app: FastAPI):
         await opc_manager.start_monitoring()
         logger.info("OPC UA client auto-started from config.")
     
-    # RFID OPC UA Manager deprecated: no auto start
-    rfid_opc_manager = None
-    if config.get("RFID_OPC_ENABLED"):
-        logger.warning("RFID_OPC_ENABLED is set but RFID OPC client is deprecated and will not start.")
-    
-    
-    # OPC UA Event Bytes Listener (neu)
+    # RFID OPC UA Event Bytes Listener 
     opc_event_listener = None
     if config.get("OPC_UA_EVENT_ENABLED", False):
         evt_url = config.get("OPC_UA_EVENT_SERVER_URL", config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840"))
@@ -233,7 +168,8 @@ async def lifespan(app: FastAPI):
             max_events=evt_max,
         )
 
-        async def _event_cb(rec):  # rec: EventBytesRecord
+        # Callback für empfangene Events
+        async def _event_cb(rec):
             await websocket_manager.broadcast_value_change({
                 "type": "opc_event",
                 "timestamp": rec.timestamp,
@@ -242,17 +178,14 @@ async def lifespan(app: FastAPI):
             if rec.payload:
                 now_ts = time.time()
                 for hx in extract_hex_ids_from_payload(rec.payload):
-                    # Persist in DB
                     if assignment_manager:
                         await assignment_manager.record_rfid_tag(hx)
-                    # Update live window buffer
                     meta = _live_event_hex_ids.get(hx)
                     if meta:
                         meta["last_seen"] = now_ts
                         meta["count"] += 1
                     else:
                         _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
-                # Broadcast updated live_event_ids snapshot (pruned within a default window e.g. 8s)
                 try:
                     cutoff = now_ts - 8.0
                     to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
@@ -281,14 +214,12 @@ async def lifespan(app: FastAPI):
             try:
                 await _a.sleep(1.0)
                 now_ts = time.time()
-                # Prune default 8s window
                 cutoff = now_ts - 8.0
                 to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
                 for k in to_delete:
                     _live_event_hex_ids.pop(k, None)
                 ids = list(_live_event_hex_ids.keys())
                 ids.sort(key=lambda x: _live_event_hex_ids[x]["last_seen"], reverse=True)
-                # Broadcast if changed (or on first run)
                 if last_ids is None or ids != last_ids:
                     last_ids = ids.copy()
                     await websocket_manager.broadcast_json({
@@ -298,95 +229,11 @@ async def lifespan(app: FastAPI):
                         "timestamp": now_ts
                     })
             except asyncio.CancelledError:
-                # Task was cancelled during shutdown, exit gracefully
                 break
             except Exception as e:  # noqa: BLE001
                 logger.debug("Periodic live_event_ids broadcast error: %s", e)
 
     globals()["_live_event_broadcast_task"] = _a.create_task(_periodic_live_ids_broadcast())
-
-    # Direct RFID Inventory (Socket) falls aktiviert
-    if config.get("RFID_INVENTORY_ENABLED", False) and config.get("RFID_READER_IP"):
-        reader_ip = config.get("RFID_READER_IP")
-        reader_port = int(config.get("RFID_READER_PORT", 2111))
-        reader_ant = config.get("RFID_READER_ANT", "F")
-        interval = float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1))
-        retention = float(config.get("RFID_CURRENT_RETENTION_SEC", 10))
-        globals()["_rfid_retention_sec"] = retention
-        async_rfu_client = AsyncRFUInventoryClient(ip=reader_ip, port=reader_port, ant=reader_ant)
-
-        async def _poll_loop():
-            nonlocal interval, retention
-            import asyncio as _a
-            logger.info("Start direct RFID inventory polling ip=%s port=%s ant=%s interval=%.2fs", reader_ip, reader_port, reader_ant, interval)
-            try:
-                async with async_rfu_client:
-                    async for result in async_rfu_client.poll_loop(interval=interval, limit=0, full=True):
-                        now = time.time()
-                        # Update aggregation + persistence
-                        # result: list of tag dicts containing at least 'epc', maybe 'rssi_dbm', 'power_dbm', 'antenna'
-                        for tag in result:
-                            epc = tag.get("epc")
-                            if not epc:
-                                continue
-                            seen_entry = _current_rfid_seen.get(epc)
-                            if seen_entry is None:
-                                _current_rfid_seen[epc] = {
-                                    "epc": epc,
-                                    "first_seen": now,
-                                    "last_seen": now,
-                                    "read_count": 1,
-                                    "antenna": tag.get("antenna"),
-                                    "last_rssi": tag.get("rssi_dbm"),
-                                    "last_power": tag.get("power_dbm")
-                                }
-                                # Persist first time
-                                if assignment_manager:
-                                    await assignment_manager.record_rfid_tag(epc)
-                            else:
-                                seen_entry["last_seen"] = now
-                                seen_entry["read_count"] += 1
-                                if tag.get("rssi_dbm") is not None:
-                                    seen_entry["last_rssi"] = tag.get("rssi_dbm")
-                                if tag.get("power_dbm") is not None:
-                                    seen_entry["last_power"] = tag.get("power_dbm")
-                        # Retention filter + prune
-                        cutoff = now - retention
-                        to_delete = [k for k, v in _current_rfid_seen.items() if v["last_seen"] < cutoff]
-                        for k in to_delete:
-                            _current_rfid_seen.pop(k, None)
-                        # Build current live lists from retained entries
-                        live_entries = list(_current_rfid_seen.values())
-                        _current_rfid_full = [
-                            {
-                                "epc": e["epc"],
-                                "first_seen": e["first_seen"],
-                                "last_seen": e["last_seen"],
-                                "read_count": e["read_count"],
-                                "antenna": e.get("antenna"),
-                                "last_rssi": e.get("last_rssi"),
-                                "last_power": e.get("last_power")
-                            } for e in live_entries
-                        ]
-                        _current_rfid_epcs = [e["epc"] for e in live_entries]
-                        _last_rfid_timestamp = now
-                        if _current_rfid_epcs:
-                            await websocket_manager.broadcast_value_change({
-                                "type": "rfid_inventory",
-                                "tags": _current_rfid_epcs,
-                                "count": len(_current_rfid_epcs),
-                                "timestamp": now
-                            })
-            except RFUInventoryError as e:
-                logger.error("RFID inventory polling stopped (protocol error): %s", e)
-            except Exception as e:  # noqa: BLE001
-                logger.exception("RFID inventory polling crashed: %s", e)
-            finally:
-                logger.info("RFID inventory polling task ended")
-
-        _rfid_poll_task = asyncio.create_task(_poll_loop())
-    else:
-        logger.info("Direct RFID inventory disabled or missing IP in config.")
 
     # Initialize format data manager (store cache under /data)
     cache_dir = Path(__file__).parent.parent / "data"
@@ -402,23 +249,15 @@ async def lifespan(app: FastAPI):
         await opc_manager.stop_monitoring()
     if opc_event_listener:
         await opc_event_listener.stop()
-    # Stop direct RFID inventory
-    if _rfid_poll_task:
-        _rfid_poll_task.cancel()
+    _task = globals().get("_live_event_broadcast_task")
+    if _task:
+        _task.cancel()
         try:
-            await _rfid_poll_task
-        except (Exception, asyncio.CancelledError):  # noqa: BLE001
-            pass
-    if _live_event_broadcast_task:
-        _live_event_broadcast_task.cancel()
-        try:
-            await _live_event_broadcast_task
+            await _task
         except (Exception, asyncio.CancelledError):  # noqa: BLE001
             pass
     if assignment_manager:
         await assignment_manager.close()
-    if opc_manager:
-        await opc_manager.stop_monitoring()
 
 app = FastAPI(title="RFID Parts Backend", version="1.0.0", lifespan=lifespan)
 
@@ -440,19 +279,18 @@ def _collect_local_ips():
     ips = set()
     try:
         hostname = socket.gethostname()
-        # Primäre Host-IP
         ip = socket.gethostbyname(hostname)
         if ip and ip != "127.0.0.1":
             ips.add(ip)
     except Exception as e:  # noqa: BLE001
         logger.debug("Host IP detection failed: %s", e)
-    # Zusätzliche heuristik: Docker default gateway häufig 172.17.0.1
-    possible = ["172.17.0.1", os.getenv("HOST_IP", "")]  # HOST_IP optional vom Deployment mitgeben
+    possible = ["172.17.0.1", os.getenv("HOST_IP", "")]
     for p in possible:
         if p and p.count('.') == 3:
             ips.add(p)
     return list(ips)
 
+# CORS Configuration for development and local access
 _default_cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -495,6 +333,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # Debug Middleware um CORS-Probleme (400) zu analysieren
 @app.middleware("http")
 async def _cors_debug_logger(request, call_next):  # noqa: D401
@@ -504,15 +343,12 @@ async def _cors_debug_logger(request, call_next):  # noqa: D401
         headers_list = {k.lower(): v for k, v in request.headers.items() if k.lower().startswith("access-control")}
         logger.info("CORS DEBUG OPTIONS path=%s origin=%s acrm=%s headers=%s", request.url.path, origin, acrm, headers_list)
     return await call_next(request)
-# -------------------------------------------------------------------------------
 
 # Path to store HTML cache under shared /data (also mapped as a volume)
 CACHE_DIR = Path(__file__).parent.parent / "data"
 CACHE_DIR.mkdir(exist_ok=True)
 HTML_CACHE_PATH = CACHE_DIR / "customer-html-cache.html"
-# Also keep a copy of the original (non-injected) upload for reference/processing if needed
 HTML_CACHE_ORIGINAL_PATH = CACHE_DIR / "customer-html-cache.original.html"
-# Optional secondary path name for the injected copy (convenience alongside the primary path)
 HTML_CACHE_INJECTED_COPY_PATH = CACHE_DIR / "customer-html-cache.injected.html"
 
 # Pydantic models for request/response
@@ -547,14 +383,7 @@ class FormatParseResponse(BaseModel):
 class ConfigUpdate(BaseModel):
     OPC_UA_SERVER_URL: Optional[str] = None
     OPC_UA_NODE_ID: Optional[str] = None
-    OPC_UA_ENABLED: Optional[bool] = None    
-    RFID_INVENTORY_ENABLED: Optional[bool] = None
-    RFID_READER_IP: Optional[str] = None
-    RFID_READER_PORT: Optional[int] = None
-    RFID_READER_ANT: Optional[str] = None
-    RFID_CURRENT_RETENTION_SEC: Optional[int] = None
-    RFID_INVENTORY_INTERVAL_SEC: Optional[int] = None
-    # OPC UA Event Listener
+    OPC_UA_ENABLED: Optional[bool] = None
     OPC_UA_EVENT_ENABLED: Optional[bool] = None
     OPC_UA_EVENT_SERVER_URL: Optional[str] = None
     OPC_UA_EVENT_TYPE: Optional[str] = None
@@ -562,6 +391,7 @@ class ConfigUpdate(BaseModel):
     OPC_UA_EVENT_MAX_EVENTS: Optional[int] = None
     THEME_COLOR: Optional[str] = None
 
+# API Endpoints
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -594,24 +424,6 @@ async def health_check():
             "has_value": False,
             "last_updated": None
         }
-
-    if rfid_opc_manager:
-        rfid_opc_status = await rfid_opc_manager.get_status()
-        health_data["rfid_opc"] = {
-            "enabled": rfid_opc_status["enabled"],
-            "available": rfid_opc_status["available"],
-            "connection_status": rfid_opc_status["connection_status"],
-            "has_value": rfid_opc_status["current_value"] is not None,
-            "last_updated": rfid_opc_status["last_updated"]
-        }
-    else:
-        health_data["rfid_opc"] = {
-            "enabled": False,
-            "available": False,
-            "connection_status": "disabled",
-            "has_value": False,
-            "last_updated": None
-        }
     
     # Add Event Listener status
     if opc_event_listener:
@@ -627,8 +439,6 @@ async def health_check():
 @app.post("/api/verify-password")
 async def verify_password(request: PasswordRequest):
     """Verify password for Somic access"""
-    # You can implement more sophisticated password verification here
-    # For now, keeping the same logic as your Next.js app
     if request.password == "a":
         return PasswordResponse(success=True, message="Password correct")
     else:
@@ -638,14 +448,11 @@ async def verify_password(request: PasswordRequest):
 async def get_customer_html(request: Request, original: bool = False):
     """Get cached customer HTML"""
     try:
-        # When explicitly requested, return the original (non-injected) HTML if it exists
         if original and HTML_CACHE_ORIGINAL_PATH.exists():
             with open(HTML_CACHE_ORIGINAL_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
             return HTMLResponse(content=content)
-        # Default: return the injected HTML cache (backward compatible behavior)
         if HTML_CACHE_PATH.exists():
-            # Refresh inline script and backend-origin meta on every GET so clients receive latest logic
             try:
                 raw = HTML_CACHE_PATH.read_text(encoding="utf-8", errors="ignore")
                 soup = BeautifulSoup(raw, "lxml")
@@ -656,7 +463,6 @@ async def get_customer_html(request: Request, original: bool = False):
                 except Exception:
                     soup = None
             if soup is not None:
-                # Update somic-backend-origin meta to match request origin (respect X-Forwarded-Proto)
                 try:
                     xf_proto = request.headers.get("x-forwarded-proto")
                     scheme = (xf_proto or request.url.scheme or "http").split(",")[0].strip()
@@ -672,7 +478,6 @@ async def get_customer_html(request: Request, original: bool = False):
                         meta_origin['content'] = desired_origin
                 except Exception:
                     pass
-                # Replace inline client script with latest file content
                 try:
                     script_tag = soup.find('script', attrs={'id': 'somic-rfid-inline'})
                     static_path = Path(__file__).parent / 'static' / 'somic-rfid.js'
@@ -682,7 +487,6 @@ async def get_customer_html(request: Request, original: bool = False):
                 except Exception:
                     pass
                 return HTMLResponse(content=str(soup))
-            # Fallback: return as-is
             with open(HTML_CACHE_PATH, "r", encoding="utf-8") as f:
                 content = f.read()
             return HTMLResponse(content=content)
@@ -692,6 +496,7 @@ async def get_customer_html(request: Request, original: bool = False):
         logger.error(f"Error reading HTML cache: {e}")
         raise HTTPException(status_code=500, detail="Error reading HTML cache")
 
+# Extract main table rows endpoint
 @app.get("/api/main-table-rows")
 async def get_main_table_rows(
     as_html: bool = True,
@@ -699,14 +504,7 @@ async def get_main_table_rows(
     with_meta: bool = False,
     duplicate_caption: bool = False
 ):
-    """Extract all <tr> rows from the cached <table class="main">.
-
-    Query Params:
-        as_html: Return raw HTML (default) or plain text.
-        strip_whitespace: Trim whitespace around HTML rows.
-        with_meta: Include class meta + flags (adds rowsMeta output format when true).
-        duplicate_caption: After every row with classes 'caption line' append all rows having only class 'caption'.
-    """
+    """Extract main table rows from cached HTML"""
     if not HTML_CACHE_PATH.exists():
         raise HTTPException(status_code=404, detail="customer-html-cache.html not found. Upload a file first.")
     try:
@@ -742,7 +540,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
         if not file:
             raise HTTPException(status_code=400, detail="No file uploaded")
         
-        # Read the uploaded file
         content = await file.read()
         html_text = content.decode("utf-8")
 
@@ -752,7 +549,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
             except Exception:
                 soup = BeautifulSoup(html, "html.parser")
 
-            # Avoid double injection
             if soup.find('meta', attrs={'name': 'somic-rfid-injected'}):
                 return str(soup)
 
@@ -760,20 +556,16 @@ async def upload_customer_html(file: UploadFile = File(...)):
             logger.info("inject_rfid: tables found=%d", len(soup.find_all('table')))
             tables = soup.find_all('table')
             for table in tables:
-                # Only operate on the main process table
                 table_classes = table.get('class') or []
                 if 'main' not in table_classes:
                     continue
-                # header injection: try thead first, otherwise find the first <tr> that contains <th>
                 header_tr = None
-                # Prefer the explicit header row for main table
                 header_tr = table.select_one('tr.caption[name="TableHead"]')
                 if not header_tr:
                     thead = table.find('thead')
                     if thead and thead.find('tr'):
                         header_tr = thead.find('tr')
                 if not header_tr:
-                    # fallback: first row that contains <th>
                     for candidate in table.find_all('tr'):
                         if candidate.find('th'):
                             header_tr = candidate
@@ -781,7 +573,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
 
                 if header_tr:
                     headers = header_tr.find_all('th')
-                    # Remove duplicate 'RFID' headers if present
                     rfid_ths = [h for h in headers if ((h.get_text() or '').strip().lower() == 'rfid')]
                     if len(rfid_ths) > 1:
                         for extra in rfid_ths[1:]:
@@ -789,7 +580,7 @@ async def upload_customer_html(file: UploadFile = File(...)):
                                 extra.decompose()
                             except Exception:
                                 pass
-                        headers = header_tr.find_all('th')  # refresh after removal
+                        headers = header_tr.find_all('th')
                     has_rfid = any((h.get_text() or '').strip().lower() == 'rfid' for h in headers)
                     if not has_rfid:
                         new_th = soup.new_tag('th')
@@ -802,7 +593,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                         injected_any = True
                         logger.debug("inject_rfid: inserted header in table (header_tr)")
 
-                        # After adding a new column, adjust any 'line' rows that rely on colspan
                         for row in table.find_all('tr'):
                             row_classes = row.get('class') or []
                             if 'line' in row_classes:
@@ -815,21 +605,16 @@ async def upload_customer_html(file: UploadFile = File(...)):
                                         except Exception:
                                             pass
 
-                # rows: find tr elements and check first td classes + tr class attr empty
                 rows = table.find_all('tr')
                 for tr in rows:
-                    # Accept rows where tr.class is empty OR class attribute is missing
                     has_class_attr = 'class' in tr.attrs
                     class_attr_empty = False
                     if has_class_attr:
-                        # bs4 represents class as list; consider empty list or list of empty string as empty
                         val = tr.attrs.get('class')
                         if val is None or val == [] or (isinstance(val, list) and len(val) == 1 and val[0] == ''):
                             class_attr_empty = True
                     else:
-                        # no class attribute -> treat as acceptable (same as empty)
                         class_attr_empty = True
-                    # find first td and check classes
                     first_td = tr.find('td')
                     if not first_td:
                         continue
@@ -839,7 +624,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                     if not class_attr_empty:
                         continue
 
-                    # Determine FTL column index via header, fallback to index 3
                     header_ths = table.find_all('thead th') if table.find('thead') else []
                     ftl_idx = None
                     for idx, h in enumerate(header_ths):
@@ -855,14 +639,12 @@ async def upload_customer_html(file: UploadFile = File(...)):
                         ftl_text = (tds[3].get_text() if len(tds) > 3 else '') or ''
 
                     nr_text = (first_td.get_text() or '').strip()
-                    # Allow injection even if FTL cell is empty (we'll use NR as key in that case)
                     if not nr_text:
                         continue
                     if not ftl_text:
                         logger.debug("inject_rfid: empty FTL for row nr=%s, injecting with NR-only key", nr_text)
 
                     key = f"{nr_text} {ftl_text}".strip()
-                    # Avoid duplicating RFID cell if already present at index 2
                     existing_cells = tr.find_all('td')
                     already = False
                     if len(existing_cells) > 2 and (existing_cells[2].get_text() or '').strip() in ['✔', '✖', '–']:
@@ -871,7 +653,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                         logger.debug("inject_rfid: row %s already has rfid cell", key)
                         continue
 
-                    # create new td with placeholder
                     new_td = soup.new_tag('td')
                     new_td.string = '–'
                     new_td['title'] = f'Kein RFID zugeordnet | Key={key}'
@@ -885,7 +666,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                     injected_any = True
                     logger.debug("inject_rfid: injected td for key=%s", key)
 
-            # inject meta marker and small JS if something was injected
             if injected_any:
                 logger.info("inject_rfid: injected_any=true, adding script tag and meta")
                 head = soup.find('head')
@@ -900,13 +680,11 @@ async def upload_customer_html(file: UploadFile = File(...)):
                 meta['content'] = '1'
                 head.append(meta)
 
-                # Optional legend enabled by default; can be disabled by setting content='0' later
                 meta_legend = soup.new_tag('meta')
                 meta_legend['name'] = 'somic-rfid-legend'
                 meta_legend['content'] = '1'
                 head.append(meta_legend)
 
-                # Provide backend origin hint for WS when served via different frontend origin
                 try:
                     backend_host = os.getenv('BACKEND_HOST', '127.0.0.1')
                     if backend_host in ('0.0.0.0', '::'):
@@ -920,7 +698,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                 except Exception:
                     pass
 
-                # Inline the helper JS to avoid cross-origin static file issues
                 try:
                     static_path = Path(__file__).parent / 'static' / 'somic-rfid.js'
                     script_code = static_path.read_text(encoding='utf-8', errors='ignore')
@@ -932,7 +709,6 @@ async def upload_customer_html(file: UploadFile = File(...)):
                     else:
                         soup.append(inline)
                 except Exception:
-                    # Fallback to external reference if inline failed
                     script_tag = soup.new_tag('script', src='/static/somic-rfid.js')
                     if soup.body:
                         soup.body.append(script_tag)
@@ -941,10 +717,8 @@ async def upload_customer_html(file: UploadFile = File(...)):
 
             return str(soup)
 
-        # apply injection
         injected_html = inject_rfid_column_and_ws(html_text)
 
-        # Save original upload (bytes, no changes)
         try:
             with open(HTML_CACHE_ORIGINAL_PATH, "wb") as f_orig:
                 f_orig.write(content)
@@ -952,17 +726,14 @@ async def upload_customer_html(file: UploadFile = File(...)):
         except Exception as we:  # noqa: BLE001
             logger.error("Failed to save original HTML to %s: %s", HTML_CACHE_ORIGINAL_PATH, we)
 
-        # Save injected HTML to the primary cache path (backward compatible)
         with open(HTML_CACHE_PATH, "w", encoding="utf-8") as f:
             f.write(injected_html)
-        # Also write a convenience injected copy under a distinct filename if possible
         try:
             with open(HTML_CACHE_INJECTED_COPY_PATH, "w", encoding="utf-8") as f_inj:
                 f_inj.write(injected_html)
         except Exception as we:  # noqa: BLE001
             logger.debug("Optional write of injected copy failed (%s): %s", HTML_CACHE_INJECTED_COPY_PATH, we)
 
-        # Return the injected content as HTML
         return HTMLResponse(content=injected_html)
     except Exception as e:
         logger.error(f"Error uploading HTML file: {e}")
@@ -981,7 +752,6 @@ async def get_format_data():
                 data={}
             )
         
-        # Parse the format data
         format_data = format_manager.get_format_data()
         
         if not format_data:
@@ -1039,7 +809,6 @@ async def get_format_parts_per_format_with_index():
         logger.error(f"Error getting format parts per format with index: {e}")
         return {"formatPartsPerFormatWithIndex": {}, "error": str(e)}
 
-# OPC UA API Endpoints
 @app.get("/api/opc-ua/status")
 async def get_opc_ua_status():
     """Get OPC UA connection status and configuration"""
@@ -1080,87 +849,21 @@ async def get_opc_ua_value():
         "last_updated": status["last_updated"]
     }
 
-@app.get("/api/rfid-opc-ua/status")
-async def get_rfid_opc_ua_status():
-    """Get RFID OPC UA connection status"""
-    if not rfid_opc_manager:
-        return {
-            "enabled": False,
-            "available": False,
-            "connection_status": "disabled"
-        }
-    
-    return await rfid_opc_manager.get_status()
-
-@app.get("/api/rfid-opc-ua/value")
-async def get_rfid_opc_ua_value():
-    """Get current RFID OPC UA node value"""
-    if not rfid_opc_manager:
-        raise HTTPException(status_code=400, detail="RFID OPC UA is disabled")
-    
-    status = await rfid_opc_manager.get_status()
-    
-    if status["connection_status"] != "connected":
-        raise HTTPException(status_code=503, detail="RFID OPC UA not connected")
-    
-    current_value = await rfid_opc_manager.get_current_value()
-    if current_value is None:
-        raise HTTPException(status_code=404, detail="No RFID value available")
-    
-    return {
-        "success": True,
-        "data": current_value,
-        "last_updated": status["last_updated"]
-    }
-
 @app.get("/api/rfid-tags")
 async def list_persisted_rfid_tags():
-    """Alle persistierten RFID Tags aus der Datenbank.
-
-    Gibt Metadaten (first_seen, last_seen, read_count) zurück; keine Live-RSSI Werte.
-    """
+    """Alle persistierten RFID Tags aus der Datenbank."""
     if not assignment_manager:
         raise HTTPException(status_code=503, detail="Assignment manager not available")
     tags = await assignment_manager.list_rfid_tags()
     return {"success": True, "count": len(tags), "tags": tags}
 
-@app.get("/api/current-rfid-tag-ids")
-async def list_current_rfid_tag_ids():
-    """Aktuell lesbare Tag-IDs basierend auf Retention-Window.
 
-    Nutzt den direkten Inventory-Puffer. Es erfolgt kein Fallback auf Datenbank,
-    weil nur die gerade (innerhalb der Retention) gesehenen Tags interessant sind.
-    """
-    global _current_rfid_epcs, _last_rfid_timestamp, _rfid_retention_sec
-    # Optional: Soft refresh retention filtering (prune by timestamp now)
-    now = time.time()
-    cutoff = now - _rfid_retention_sec
-    # Prune global seen dict again (in case Poll loop paused)
-    for epc, meta in list(_current_rfid_seen.items()):
-        if meta["last_seen"] < cutoff:
-            _current_rfid_seen.pop(epc, None)
-    _current_rfid_epcs = [e for e in _current_rfid_seen.keys()]
-    if not _current_rfid_epcs:
-        return {"success": True, "tagIds": [], "count": 0, "timestamp": _last_rfid_timestamp, "retention_sec": _rfid_retention_sec}
-    return {
-        "success": True,
-        "tagIds": _current_rfid_epcs,
-        "count": len(_current_rfid_epcs),
-        "timestamp": _last_rfid_timestamp,
-        "retention_sec": _rfid_retention_sec
-    }
-
-# Alias-Endpunkt damit Aufruf /api/rfid-tag-ids (ohne "current-") funktioniert
 @app.get("/api/rfid-tag-ids")
 async def list_current_rfid_tag_ids_alias():
-    """Nur die persistierten Tag-IDs (gleiche Quelle wie /api/rfid-tags, aber ohne Metadaten).
-
-    Hintergrund Wunsch: statt des Live-Retention Puffers ("current") sollen hier ausschließlich
-    die dauerhaft gespeicherten Tags zurückkommen. Live-EPCs bleiben über /api/current-rfid-tag-ids verfügbar.
-    """
+    """Alias endpoint to list RFID tag IDs only"""
     if not assignment_manager:
         raise HTTPException(status_code=503, detail="Assignment manager not available")
-    tags = await assignment_manager.list_rfid_tags()  # enthält Metadaten
+    tags = await assignment_manager.list_rfid_tags()
     tag_ids = [t["tag_id"] for t in tags]
     return {
         "success": True,
@@ -1169,29 +872,10 @@ async def list_current_rfid_tag_ids_alias():
         "source": "db"
     }
 
-# Einfacher Status-Endpunkt für das direkte Inventory (Debug-Hilfe)
-@app.get("/api/rfid-inventory/status")
-async def rfid_inventory_status():
-    running = _rfid_poll_task is not None and not _rfid_poll_task.done()
-    return {
-        "running": running,
-        "tag_count": len(_current_rfid_epcs),
-        "last_timestamp": _last_rfid_timestamp,
-        "retention_sec": _rfid_retention_sec,
-        "reader": None if not async_rfu_client else {
-            "ip": async_rfu_client.ip,
-            "port": async_rfu_client.port,
-            "ant": async_rfu_client.ant
-        }
-    }
-
-
-# WebSocket endpoint for OPC UA updates
 @app.websocket("/ws/opc-ua")
 async def websocket_opc_ua_updates(websocket: WebSocket):
     """WebSocket endpoint for OPC UA event updates"""
     await websocket_manager.connect(websocket)
-    # Initial Snapshots: Assignments & Live Event IDs
     try:
         if assignment_manager:
             assignments = await assignment_manager.get_all_assignments()
@@ -1201,7 +885,6 @@ async def websocket_opc_ua_updates(websocket: WebSocket):
                 "count": len(assignments),
                 "timestamp": time.time()
             }))
-        # Live Event IDs snapshot
         if _live_event_hex_ids:
             now_ts = time.time()
             ids_snapshot = list(_live_event_hex_ids.keys())
@@ -1216,11 +899,8 @@ async def websocket_opc_ua_updates(websocket: WebSocket):
 
     try:
         while True:
-            # Wait for a message from the client (optional, if you want to receive messages)
             data = await websocket.receive_text()
             logger.info(f"Received WebSocket message: {data}")
-            
-            # You can add logic here to handle incoming WebSocket messages if needed
             
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
@@ -1228,8 +908,6 @@ async def websocket_opc_ua_updates(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         websocket_manager.disconnect(websocket)
 
-
-# Format Part Assignment API Endpoints
 @app.get("/api/format-assignments")
 async def get_format_assignments():
     """Get all format part to RFID tag assignments"""
@@ -1242,8 +920,8 @@ async def get_format_assignments():
         
         return {
             "success": True,
-            "assignments": assignments,  # Dict format for frontend compatibility
-            "assignments_list": assignments_list,  # List format with metadata
+            "assignments": assignments,
+            "assignments_list": assignments_list,
             "count": len(assignments)
         }
     except Exception as e:
@@ -1263,7 +941,6 @@ async def assign_rfid_to_format_part(assignment: FormatPartAssignmentRequest):
         )
         
         if success:
-            # Broadcast updated assignments snapshot
             try:
                 assignments = await assignment_manager.get_all_assignments()
                 await websocket_manager.broadcast_json({
@@ -1337,28 +1014,22 @@ def get_config():
 
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate):
+    """Update configuration settings"""
     global opc_manager, rfid_opc_manager, opc_event_listener
     config = load_config()
-    # Log the raw incoming update payload for debugging
+    
     try:
         logger.info(f"Received config update payload: {update.dict()}")
     except Exception:
         logger.info("Received config update payload (could not serialize)")
     changed = False
 
-    
-    # Track OPC UA changes
     opc_ua_enabled_before = config.get("OPC_UA_ENABLED", False)
     opc_ua_enabled_after = update.OPC_UA_ENABLED if update.OPC_UA_ENABLED is not None else opc_ua_enabled_before
     opc_ua_config_changed = False
     
-    # RFID OPC deprecated: ignore toggles
-    
-    # Update all config values
     for key in [
-    "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
-        "RFID_INVENTORY_ENABLED", "RFID_READER_IP", "RFID_READER_PORT", "RFID_READER_ANT",
-        "RFID_CURRENT_RETENTION_SEC", "RFID_INVENTORY_INTERVAL_SEC",
+        "OPC_UA_SERVER_URL", "OPC_UA_NODE_ID", "OPC_UA_ENABLED",
         "OPC_UA_EVENT_ENABLED", "OPC_UA_EVENT_SERVER_URL", "OPC_UA_EVENT_TYPE",
         "OPC_UA_EVENT_INTERVAL_MS", "OPC_UA_EVENT_MAX_EVENTS",
         "THEME_COLOR"
@@ -1375,18 +1046,13 @@ async def update_config(update: ConfigUpdate):
         save_config(config)
         logger.info(f"Config SAVED: {config}")
         
-        # Handle OPC UA changes
         if opc_ua_config_changed:
             await handle_opc_ua_config_change(config, opc_ua_enabled_before, opc_ua_enabled_after)
-    # RFID OPC changes ignored
-    # Direct RFID inventory
-    await handle_direct_rfid_inventory_config_change(config)
-    # Event Listener config apply
     await handle_opc_event_listener_config_change(config)
     
     return config
 
-
+# Pictures Directory and Static Mounting
 PICTURES_ENV_OVERRIDE = os.getenv("PICTURES_DIR", "").strip()
 _pictures_static_mounted = False
 
@@ -1397,6 +1063,7 @@ PICTURES_DIR = (
     else (DATA_DIR / os.getenv("PICTURES_SUBDIR", "pictures"))
 ).resolve()
 
+# Ensure pictures directory exists
 def _ensure_pictures_dir() -> bool:
     try:
         PICTURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1405,8 +1072,8 @@ def _ensure_pictures_dir() -> bool:
         logger.error("Failed to ensure pictures directory %s: %s", PICTURES_DIR, e)
         return False
 
+# Mount /pictures static route
 def _mount_pictures_static() -> None:
-    """Mount /pictures static route if directory is available and not yet mounted."""
     global _pictures_static_mounted
     if _pictures_static_mounted:
         return
@@ -1416,7 +1083,6 @@ def _mount_pictures_static() -> None:
             return
     try:
         app.mount("/pictures", StaticFiles(directory=str(PICTURES_DIR)), name="pictures")
-        # Serve small static helpers (e.g. somic-rfid.js)
         static_dir = Path(__file__).parent / 'static'
         if static_dir.exists():
             app.mount('/static', StaticFiles(directory=str(static_dir)), name='static')
@@ -1425,22 +1091,15 @@ def _mount_pictures_static() -> None:
     except Exception as e:  # noqa: BLE001
         logger.error("Failed to mount /pictures static directory %s: %s", PICTURES_DIR, e)
 
-# Initial attempt at import time
 _mount_pictures_static()
 
 @app.get("/api/pictures")
 def list_pictures(include_meta: bool = False, part: str | None = None):
-    """List files in the persistent pictures directory.
-
-    Query Params:
-        include_meta: If true, return size & modified timestamp per file.
-    Auto-heals: If directory was removed after startup, attempts recreation.
-    """
+    """List all pictures in the pictures directory."""
     try:
         if not PICTURES_DIR.exists():
             if not _ensure_pictures_dir():
                 return JSONResponse({"success": False, "files": [], "count": 0, "message": "pictures directory unavailable"})
-            # Try (re)mount if we just re-created it
             _mount_pictures_static()
         entries = []
         for name in sorted(os.listdir(PICTURES_DIR)):
@@ -1450,7 +1109,6 @@ def list_pictures(include_meta: bool = False, part: str | None = None):
             if not full.is_file():
                 continue
             if part and not name.startswith(part + "_") and not name.startswith(part + "."):
-                # Convention: either exact part as prefix with underscore timestamp or direct filename starting with part.
                 continue
             if include_meta:
                 stat = full.stat()
@@ -1475,11 +1133,7 @@ def list_pictures(include_meta: bool = False, part: str | None = None):
 
 @app.get("/api/pictures/by-part/{format_part}")
 def list_pictures_for_part(format_part: str):
-    """Return only pictures that belong to a given format part.
-
-    A picture is considered belonging to a part if the filename starts with
-    "{format_part}_" or "{format_part}." (for legacy direct naming)
-    """
+    """List pictures associated with a specific format part."""
     try:
         if not PICTURES_DIR.exists():
             if not _ensure_pictures_dir():
@@ -1490,7 +1144,7 @@ def list_pictures_for_part(format_part: str):
         logger.error("Error listing pictures for part %s: %s", format_part, e)
         raise HTTPException(status_code=500, detail="Error retrieving pictures for part")
 
-
+# Helper to sanitize format part for filename usage
 def _sanitize_part(part: str) -> str:
     import re
     cleaned = re.sub(r"[^A-Za-z0-9_\-]", "_", part.strip())[:100]
@@ -1505,12 +1159,7 @@ async def upload_picture(
     file: UploadFile | None = File(None),
     image_base64: str | None = Form(None),
 ):
-    """Upload a picture for a specific format part.
-
-    Supports either multipart file upload (preferred) or a base64 encoded
-    data URL passed via form field `image_base64` (e.g. from a camera capture).
-    The stored filename pattern: {format_part}_{timestamp}.{ext}
-    """
+    """Upload a picture for a specific format part, either as a file upload or base64 string."""
     import base64
     import secrets
     import mimetypes
@@ -1525,7 +1174,6 @@ async def upload_picture(
         if not _ensure_pictures_dir():
             raise HTTPException(status_code=500, detail="Pictures directory unavailable")
 
-    # Determine content & extension
     content: bytes
     ext = "jpg"
 
@@ -1534,7 +1182,6 @@ async def upload_picture(
             content = await file.read()
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}")
-        # Guess extension from filename or content type
         orig_name = file.filename or "upload"
         if "." in orig_name:
             ext_candidate = orig_name.rsplit(".", 1)[1].lower()
@@ -1544,10 +1191,8 @@ async def upload_picture(
             guessed_ext = mimetypes.guess_extension(file.content_type) or ".jpg"
             ext = guessed_ext.lstrip('.')
     else:
-        # Handle base64 data URL or raw base64
         b64 = image_base64.strip()
         if b64.startswith("data:"):
-            # data:image/png;base64,XXXX
             try:
                 header, b64data = b64.split(",", 1)
                 if ";base64" in header:
@@ -1561,7 +1206,6 @@ async def upload_picture(
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(status_code=400, detail=f"Invalid data URL: {e}")
         else:
-            # Raw base64 assumed jpeg
             try:
                 content = base64.b64decode(b64)
                 ext = "jpg"
@@ -1587,149 +1231,12 @@ async def upload_picture(
 
     return {"success": True, "filename": filename, "format_part": part_clean, "size": len(content)}
 
-
-async def handle_direct_rfid_inventory_config_change(config):
-    """Start/stop/restart des direkten RFID Inventory Pollings je nach Config.
-
-    BUGFIX: Vorher wurde immer sofort gestoppt wegen eines unbeabsichtigten
-    return hinter globalem Reset. Jetzt korrekt gesteuert.
-    """
-    global async_rfu_client, _rfid_poll_task, _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen, _rfid_retention_sec
-
-    enabled = config.get("RFID_INVENTORY_ENABLED", False) and bool(config.get("RFID_READER_IP"))
-    desired_ip = config.get("RFID_READER_IP", "")
-    # Robust numerische Konvertierung um 500 bei leerem/ungültigem Input zu vermeiden
-    def _to_int(val, default):
-        try:
-            if val is None: return default
-            if isinstance(val, str) and val.strip() == "": return default
-            return int(val)
-        except Exception:
-            logger.warning("RFID config invalid int '%s' -> fallback %s", val, default)
-            return default
-    def _to_float(val, default):
-        try:
-            if val is None: return default
-            if isinstance(val, str) and val.strip() == "": return default
-            return float(val)
-        except Exception:
-            logger.warning("RFID config invalid float '%s' -> fallback %s", val, default)
-            return default
-
-    desired_port = _to_int(config.get("RFID_READER_PORT", 2111), 2111)
-    desired_ant = config.get("RFID_READER_ANT", "F")
-    interval = _to_float(config.get("RFID_INVENTORY_INTERVAL_SEC", 1), 1.0)
-    retention = _to_float(config.get("RFID_CURRENT_RETENTION_SEC", 10), 10.0)
-    _rfid_retention_sec = retention
-
-    restart = False
-    if _rfid_poll_task and _rfid_poll_task.done():
-        restart = True
-    if async_rfu_client and enabled:
-        if async_rfu_client.ip != desired_ip or async_rfu_client.port != desired_port or async_rfu_client.ant != desired_ant:
-            restart = True
-
-    if not enabled:
-        # Stop & reset only when disabling
-        if _rfid_poll_task:
-            _rfid_poll_task.cancel()
-            try:
-                await _rfid_poll_task
-            except Exception:  # noqa: BLE001
-                pass
-            _rfid_poll_task = None
-        async_rfu_client = None
-        _current_rfid_full = []
-        _current_rfid_epcs = []
-        _current_rfid_seen = {}
-        _last_rfid_timestamp = None
-        logger.info("Direct RFID inventory stopped (disabled)")
-        return
-
-    # Enabled path
-    if enabled and (async_rfu_client is None or restart or _rfid_poll_task is None):
-        if _rfid_poll_task:
-            _rfid_poll_task.cancel()
-            try:
-                await _rfid_poll_task
-            except Exception:  # noqa: BLE001
-                pass
-        async_rfu_client = AsyncRFUInventoryClient(ip=desired_ip, port=desired_port, ant=desired_ant)
-        logger.info("(Re)starting direct RFID inventory ip=%s port=%s ant=%s interval=%.2fs retention=%.1fs", desired_ip, desired_port, desired_ant, interval, retention)
-
-        async def _poll_loop():
-            global _current_rfid_full, _current_rfid_epcs, _last_rfid_timestamp, _current_rfid_seen
-            try:
-                async with async_rfu_client:
-                    async for result in async_rfu_client.poll_loop(interval=interval, limit=0, full=True):
-                        now = time.time()
-                        for tag in result:
-                            epc = tag.get("epc")
-                            if not epc:
-                                continue
-                            seen_entry = _current_rfid_seen.get(epc)
-                            if seen_entry is None:
-                                _current_rfid_seen[epc] = {
-                                    "epc": epc,
-                                    "first_seen": now,
-                                    "last_seen": now,
-                                    "read_count": 1,
-                                    "antenna": tag.get("antenna"),
-                                    "last_rssi": tag.get("rssi_dbm"),
-                                    "last_power": tag.get("power_dbm")
-                                }
-                                if assignment_manager:
-                                    await assignment_manager.record_rfid_tag(epc)
-                            else:
-                                seen_entry["last_seen"] = now
-                                seen_entry["read_count"] += 1
-                                if tag.get("rssi_dbm") is not None:
-                                    seen_entry["last_rssi"] = tag.get("rssi_dbm")
-                                if tag.get("power_dbm") is not None:
-                                    seen_entry["last_power"] = tag.get("power_dbm")
-                        # Retention prune
-                        cutoff = now - _rfid_retention_sec
-                        for epc_key, meta in list(_current_rfid_seen.items()):
-                            if meta["last_seen"] < cutoff:
-                                _current_rfid_seen.pop(epc_key, None)
-                        live_entries = list(_current_rfid_seen.values())
-                        _current_rfid_full = [
-                            {
-                                "epc": e["epc"],
-                                "first_seen": e["first_seen"],
-                                "last_seen": e["last_seen"],
-                                "read_count": e["read_count"],
-                                "antenna": e.get("antenna"),
-                                "last_rssi": e.get("last_rssi"),
-                                "last_power": e.get("last_power")
-                            } for e in live_entries
-                        ]
-                        _current_rfid_epcs = [e["epc"] for e in live_entries]
-                        _last_rfid_timestamp = now
-                        if _current_rfid_epcs:
-                            await websocket_manager.broadcast_value_change({
-                                "type": "rfid_inventory",
-                                "tags": _current_rfid_epcs,
-                                "count": len(_current_rfid_epcs),
-                                "timestamp": now
-                            })
-            except Exception as e:  # noqa: BLE001
-                logger.exception("Direct RFID inventory poll loop error: %s", e)
-            finally:
-                logger.info("Direct RFID inventory poll loop ended")
-
-        _rfid_poll_task = asyncio.create_task(_poll_loop())
-    else:
-        logger.info("Direct RFID inventory already running (no restart needed)")
-
-# handle_rfid_opc_config_change removed (deprecated)
-
+# OPC UA Configuration Handling
 async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
     global opc_manager
     
     if enabled_before != enabled_after:
         if enabled_after:
-            # Enable OPC UA client
             from opc_client import OPCUAManager
             OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
             OPC_UA_NODE_ID = config.get("OPC_UA_NODE_ID", "ns=2;i=1")
@@ -1742,13 +1249,11 @@ async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
             await opc_manager.start_monitoring()
             logger.info("OPC UA client enabled and started live.")
         else:
-            # Disable OPC UA client
             if opc_manager:
                 await opc_manager.stop_monitoring()
                 opc_manager = None
                 logger.info("OPC UA client stopped and disabled live.")
     elif opc_manager and enabled_after:
-        # Restart with new config
         await opc_manager.stop_monitoring()
         from opc_client import OPCUAManager
         OPC_UA_SERVER_URL = config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840")
@@ -1762,9 +1267,8 @@ async def handle_opc_ua_config_change(config, enabled_before, enabled_after):
         await opc_manager.start_monitoring()
         logger.info("OPC UA client restarted live with new config.")
 
-
+# OPC UA Event Bytes Listener Handling
 async def handle_opc_event_listener_config_change(config):
-    """Start/Stop/Restart für OPC UA Event Bytes Listener nach Config-Update."""
     global opc_event_listener
     enabled = config.get("OPC_UA_EVENT_ENABLED", False)
     if not enabled:
@@ -1773,7 +1277,6 @@ async def handle_opc_event_listener_config_change(config):
             opc_event_listener = None
             logger.info("OPC UA Event Listener gestoppt (disabled)")
         return
-    # Enabled -> prüfen ob Neustart nötig
     evt_url = config.get("OPC_UA_EVENT_SERVER_URL", config.get("OPC_UA_SERVER_URL", "opc.tcp://localhost:4840"))
     evt_type = config.get("OPC_UA_EVENT_TYPE", "ns=4;i=6050")
     evt_interval = int(config.get("OPC_UA_EVENT_INTERVAL_MS", 500))
@@ -1825,6 +1328,7 @@ async def get_opc_ua_events(limit: int = 1000):
     events = opc_event_listener.get_events(limit=limit)
     return {"success": True, "count": len(events), "events": [asdict(e) for e in events]}
 
+# Statusabfrage für OPC UA Event Listener
 @app.get("/api/opc-ua/events/status")
 async def get_opc_ua_events_status():
     cfg = load_config()
@@ -1837,10 +1341,11 @@ async def get_opc_ua_events_status():
         "interval_ms": cfg.get("OPC_UA_EVENT_INTERVAL_MS")
     }
 
-# --- Hex ID Extraktion & Live Event IDs Endpoint ---
+# Hex ID Extraktion & Live Event IDs Endpoint
 import re as _re
 HEX_ID_REGEX = _re.compile(r"Ausgabe:([0-9A-Fa-f]+)")
 
+# Live Event Hex IDs Puffer
 def extract_hex_ids_from_payload(payload: str):
     core = payload.replace('<STX>', '').replace('<ETX>', '')
     found = HEX_ID_REGEX.findall(core)
@@ -1855,24 +1360,16 @@ def extract_hex_ids_from_payload(payload: str):
 
 @app.get("/api/live-event-ids")
 async def get_live_event_ids(window_sec: float = 5.0):
-    """Liefert einzigartige Hex IDs aus den jüngsten Event-Bytes innerhalb eines Zeitfensters.
-
-    window_sec: Konfigurierbares Zeitfenster (Standard 8s). Werte <0 werden auf Default gesetzt.
-    Es wird ein eigener Zeitpuffer (_live_event_hex_ids) genutzt, der bei jedem Event aktualisiert
-    und hier bereinigt wird. So muss nicht der gesamte Event-Ring erneut geparst werden.
-    """
+    """Get live RFID event hex IDs seen within the specified time window."""
     if window_sec <= 0:
         window_sec = 8.0
     running = bool(opc_event_listener and opc_event_listener.is_running())
     now_ts = time.time()
     cutoff = now_ts - window_sec
-    # Prune alte Einträge
     to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
     for k in to_delete:
         _live_event_hex_ids.pop(k, None)
-    # Ergebnis sammeln
     ids = list(_live_event_hex_ids.keys())
-    # Optional sort: neueste zuerst
     ids.sort(key=lambda x: _live_event_hex_ids[x]["last_seen"], reverse=True)
     return {
         "success": True,
@@ -1885,13 +1382,12 @@ async def get_live_event_ids(window_sec: float = 5.0):
 
 if __name__ == "__main__":
     import uvicorn
-
+    
     # Docker-kompatible Konfiguration
     host = os.getenv("BACKEND_HOST", "0.0.0.0")  # 0.0.0.0 für Docker
     port = int(os.getenv("BACKEND_PORT", "8001"))
     debug = os.getenv("DEBUG", "false").lower() == "true"
 
-    log_startup_banner()
     logger.info(f"Starting RFID Backend on {host}:{port}")
     uvicorn.run(
         "main:app",

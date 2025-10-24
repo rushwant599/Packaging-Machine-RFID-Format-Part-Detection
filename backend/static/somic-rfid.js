@@ -1,27 +1,25 @@
+// Translated strings and language detection
 (function () {
-  // --- Minimal i18n -------------------------------------------------------
   var LANG = (function detectLang() {
     try {
-      // 1) URL param
       if (typeof location !== 'undefined' && location.search) {
         var p = new URLSearchParams(location.search);
         var q = (p.get('lang') || '').toLowerCase();
         if (q === 'de' || q === 'en') return q;
       }
-      // 2) documentElement lang
       if (typeof document !== 'undefined') {
         var dl = (document.documentElement && document.documentElement.lang || '').toLowerCase();
         if (dl === 'de' || dl === 'en') return dl;
       }
-      // 3) navigator
       if (typeof navigator !== 'undefined' && navigator.language) {
         var nl = navigator.language.toLowerCase();
         if (nl.indexOf('de') === 0) return 'de';
       }
     } catch (e) {}
-    return 'de'; // default keeps former behavior
+    return 'de'; 
   })();
 
+  // Translations dictionary
   var DICT = {
     en: {
       legend_text: 'RFID: ✔ detected, ✖ not detected, – unassigned',
@@ -35,7 +33,6 @@
       missing: 'missing',
       per_format: 'Per format',
       no_assignments: 'No assignments',
-      // cell titles
       no_rfid_assigned: 'No RFID assigned',
       tag: 'Tag',
       detected: 'detected',
@@ -56,7 +53,6 @@
       missing: 'fehlen',
       per_format: 'Pro Format',
       no_assignments: 'Keine Zuordnungen',
-      // cell titles
       no_rfid_assigned: 'Kein RFID zugeordnet',
       tag: 'Tag',
       detected: 'erkannt',
@@ -66,15 +62,16 @@
       ws_prefix: 'WebSocket: ',
     }
   };
+  // Translation lookup
   function t(key){
-    var d = DICT[LANG] || DICT.de; // fall back to de to keep legacy semantics
+    var d = DICT[LANG] || DICT.de;
     return (d && d[key]) || (DICT.en && DICT.en[key]) || key;
   }
+  // Set language and update UI
   function setLanguage(lang){
     if (lang === 'de' || lang === 'en') {
       LANG = lang;
       try { if (document && document.documentElement) document.documentElement.lang = lang; } catch(e){}
-      // refresh UI pieces
       ensureLegend();
       updateLegend();
       updateAll();
@@ -89,9 +86,14 @@
       }catch(e){}
     });
   } catch(e){}
+  
   // Utility: debounce
   function debounce(fn, ms) { var t; return function () { var ctx = this, args = arguments; clearTimeout(t); t = setTimeout(function () { fn.apply(ctx, args); }, ms); }; }
+  
+  // Normalize tag string: uppercase, alphanumeric only
   function normalizeTag(t) { return (t || '').toString().trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+  // Find index of FTL column in given table
   function findFTLIndex(table) {
     try {
       var head = table.querySelector('tr.caption[name="TableHead"]');
@@ -101,7 +103,7 @@
         if (txt === 'ftl') return i;
       }
     } catch (e) { }
-    return 3; // fallback
+    return 3;
   }
 
   // Build a mapping from data-format-key -> target td element for the current table view
@@ -113,8 +115,6 @@
       var rows = table.querySelectorAll('tr');
       rows.forEach(function (tr) {
         try {
-          // Accept any row that has a first cell with class td.value.index
-          // (Some pages add classes to data rows; don't over-filter by class attr)
           var first = tr.querySelector('td.value.index');
           if (!first) return;
           var tds = tr.querySelectorAll('td');
@@ -122,22 +122,18 @@
           if (tds[0] !== first) return;
           var nr = (first.textContent || '').trim();
           if (!nr) return;
-          // Get FTL from current format JSON mapping (preferred), fallback to table cell if unknown
           var ftl = getFtlForNr(nr);
           if (!ftl) {
             var ftlIdx = findFTLIndex(table);
             ftl = (tds[ftlIdx] && tds[ftlIdx].textContent) ? tds[ftlIdx].textContent.trim() : '';
           }
           var key = ftl ? (nr + ' ' + ftl) : nr;
-          // Prefer existing td with data-format-key inside this row
           var target = tr.querySelector('td[data-format-key]');
           if (!target) {
-            // No RFID cell yet -> create one and insert before the 3rd column (index 2) if present
             target = document.createElement('td');
             target.textContent = '–';
             if (tds[2]) tds[2].parentNode.insertBefore(target, tds[2]); else tr.appendChild(target);
           }
-          // Normalize styling: centered content, zero top/bottom padding
           try {
             target.style.padding = '0 8px';
             target.style.textAlign = 'center';
@@ -157,10 +153,11 @@
     return map;
   }
 
+  // Global state
   var assignments = {};
   var liveSet = new Set();
   var map = buildMap();
-  var wsState = 'connecting'; // connecting | connected | reconnecting | error
+  var wsState = 'connecting';
 
   // --- Format JSON handling (active format -> NR to FTL mapping) ---
   var formatMaps = { byFormat: {}, names: [] };
@@ -174,6 +171,8 @@
       }
     } catch (e) { }
   }
+
+  // Build formatMaps from given format JSON data
   function buildFormatMaps(data) {
     try {
       var fmts = (data && data.formats) || {};
@@ -189,22 +188,19 @@
           var nr = (it.valueIndex || '').toString().trim();
           var ftl = (it.formatPart || '').toString().trim();
           if (!nr) continue;
-          if (!ftl || /^FTL\.?$/i.test(ftl)) continue; // ignore placeholders
+          if (!ftl || /^FTL\.?$/i.test(ftl)) continue;
           if (!nrToFtl[nr]) nrToFtl[nr] = ftl;
         }
         by[name] = nrToFtl;
       });
       formatMaps.byFormat = by;
       formatMaps.names = names;
-      // Initialize current format if not set
       if (!currentFormat) {
-        // Heuristics: try common globals or DOM selects
         var candidates = [];
         try { if (window.SelectedFormat) candidates.push(window.SelectedFormat); } catch (e) { }
         try { if (window.selectedFormat) candidates.push(window.selectedFormat); } catch (e) { }
         try { if (window.ActiveFormat) candidates.push(window.ActiveFormat); } catch (e) { }
         try { if (window.activeFormat) candidates.push(window.activeFormat); } catch (e) { }
-        // Try selects containing format names
         try {
           var sels = document.querySelectorAll('select, input[list]');
           outer: for (var sidx = 0; sidx < sels.length; sidx++) {
@@ -224,6 +220,8 @@
       }
     } catch (e) { }
   }
+
+  // Get FTL for given NR in current format
   function getFtlForNr(nr) {
     try {
       if (!nr) return '';
@@ -232,7 +230,6 @@
         if (m) {
           var f = m[nr];
           if (f) return f;
-          // also try zero-padded or trimmed variants
           var nrTrim = nr.toString().replace(/^0+/, '');
           if (nrTrim && m[nrTrim]) return m[nrTrim];
           var nrPad = nrTrim ? ('0' + nrTrim) : null;
@@ -243,15 +240,16 @@
     return '';
   }
 
-  // --- Optional Legend / Status Badge ---
+  // Optional Legend / Status Badge
   function isLegendEnabled() {
     try {
       var meta = document.querySelector('meta[name="somic-rfid-legend"]');
       if (meta) { return (meta.getAttribute('content') || '1') !== '0'; }
     } catch (e) { }
-    return true; // default on
+    return true; 
   }
 
+  // Legend element
   var legendEl = null;
   function placeLegend() {
     try {
@@ -266,6 +264,8 @@
       }
     } catch (e) { }
   }
+
+  // Create legend element if not existing
   function ensureLegend() {
     if (!isLegendEnabled()) return null;
     if (legendEl && document.body.contains(legendEl)) return legendEl;
@@ -330,7 +330,6 @@
   // Compute number of tags that are currently seen but not part of the active format rows
   function computeWrongCount() {
     try {
-      // Build expected set from current table mapping using current assignments
       var expected = new Set();
       map.forEach(function (td) {
         var tag = resolveAssignmentForTd(td);
@@ -349,14 +348,12 @@
   function computeWrongDetails() {
     var details = [];
     try {
-      // Expected tags from current map
       var expected = new Set();
       map.forEach(function (td) {
         var tag = resolveAssignmentForTd(td);
         var norm = tag ? normalizeTag(tag) : null;
         if (norm) expected.add(norm);
       });
-      // Reverse map: tagNorm -> [formatKey]
       var rev = {};
       try {
         Object.keys(assignments || {}).forEach(function (k) {
@@ -367,14 +364,12 @@
           if (n) { if (!rev[n]) rev[n] = []; if (rev[n].indexOf(k) === -1) rev[n].push(k); }
         });
       } catch (e) { }
-      // Build details for live tags not in expected
       if (liveSet && typeof liveSet.forEach === 'function') {
         liveSet.forEach(function (t) {
           if (!expected.has(t)) {
             var keys = rev[t] || [];
             var raw = null;
             if (keys.length) {
-              // Find first raw by scanning assignments for this norm
               for (var i = 0; i < keys.length && !raw; i++) {
                 var kv = assignments[keys[i]];
                 if (typeof kv === 'string') raw = kv; else if (kv && typeof kv === 'object') raw = kv.rfid_tag_id || kv.rfidTagId || kv.tagId || null;
@@ -446,16 +441,15 @@
         out.all.push(rec);
         if (name === currentFormat) { out.current = rec; }
       }
-      // If current format not found, but we have at least one, set first as current for display
       if (!out.current || !out.current.name) { if (out.all.length) { out.current = out.all[0]; } }
     } catch (e) { }
     return out;
   }
 
+  // Update legend contents
   function updateLegend() {
     var el = ensureLegend();
     if (!el) return;
-    // Ensure the static legend label is updated for the current language
     var legendText = el.querySelector('#somic-rfid-legend-text');
     if (legendText) { legendText.textContent = t('legend_text'); }
     var dot = el.querySelector('#somic-rfid-ws-dot');
@@ -475,7 +469,6 @@
     if (wrong) {
       var wdetails = computeWrongDetails();
       wrong.textContent = '(' + t('wrong') + ': ' + (wdetails ? wdetails.length : 0) + ')';
-      // Build tooltip lines "<formatKey or (unbekannt)> • …<last6>"
       try {
         var lines = [];
         for (var i = 0; i < Math.min(wdetails.length, 30); i++) {
@@ -493,7 +486,6 @@
       var stats = computeFormatStats();
       var c = stats.current || { recognized: 0, total: 0, missing: 0, name: '' };
       fmtStats.textContent = t('format') + ': ' + c.recognized + '/' + c.total + ' ' + t('recognized') + ' · ' + c.missing + '/' + c.total + ' ' + t('missing');
-      // Tooltip: per-format breakdown
       try {
         var lines2 = [];
         for (var k = 0; k < Math.min(stats.all.length, 40); k++) {
@@ -513,7 +505,6 @@
     var nr = td.getAttribute('data-nr') || '';
     var ftl = td.getAttribute('data-ftl') || '';
     var candidates = [];
-    // Combined key candidates
     if (dataKey) {
       candidates.push(dataKey);
       candidates.push(dataKey.replace(/\s+/g, ' ').trim());
@@ -525,17 +516,14 @@
       candidates.push((nr + ' ' + ftl.replace(/\./g, '')));
       candidates.push(k.replace(/\./g, '').replace(/\s+/g, ' ').trim());
     }
-    // FTL-only candidates (some backends store by format part only)
     if (ftl) {
       candidates.push(ftl);
       candidates.push(ftl.replace(/\./g, ''));
       candidates.push(ftl.replace(/\s+/g, ''));
     }
-    // Deduplicate
     var seenC = new Set();
     var final = [];
     for (var i = 0; i < candidates.length; i++) { var c = candidates[i]; if (c && !seenC.has(c)) { seenC.add(c); final.push(c); } }
-    // Try resolving
     for (var j = 0; j < final.length; j++) {
       var key = final[j];
       var assign = assignments[key];
@@ -550,6 +538,7 @@
     return null;
   }
 
+  // Update all TDs in the map based on current assignments and liveSet
   function updateAll() {
     map.forEach(function (td) {
       var tag = resolveAssignmentForTd(td);
@@ -565,18 +554,14 @@
           : (t('tag') + ' ' + tag + ' ' + t('not_detected') + ' | ' + t('key') + '=' + kinfo + ' | ' + t('norm') + '=' + norm)
         );
       td.style.color = tag ? (seen ? '#0a7a15' : '#b30000') : '#666';
-      // Apply background color based on state
       try {
         if (!tag) {
-          // Neutral state
           td.style.backgroundColor = '#ffffff';
           td.style.borderColor = '#000000';
         } else if (seen) {
-          // Green for recognized
           td.style.backgroundColor = '#99e47cff';
           td.style.borderColor = '#000000';
         } else {
-          // Red for not recognized
           td.style.backgroundColor = '#ec7e7eff';
           td.style.borderColor = '#000000';
         }
@@ -585,12 +570,17 @@
     updateLegend();
   }
 
+  // Handlers for incoming data
   function handleAssignmentsUpdate(obj) { assignments = obj || {}; updateAll(); }
+
+  // live IDs is an array of tag strings
   function handleLiveIds(ids) { liveSet = new Set((ids || []).map(function (t) { return normalizeTag(t); }).filter(Boolean)); updateAll(); }
 
+  // Rebuild map and update all
   function rebuildMap() { map = buildMap(); updateAll(); }
   var debouncedRebuild = debounce(rebuildMap, 100);
 
+  // Observe main table for changes
   function observeMainTable() {
     try {
       var table = document.querySelector('table.main');
@@ -603,7 +593,7 @@
   // Observe the document for late insertion of table.main and reposition legend
   function observeForTable() {
     try {
-      if (document.querySelector('table.main')) return; // already present
+      if (document.querySelector('table.main')) return;
       var docObs = new MutationObserver(function () {
         var t = document.querySelector('table.main');
         if (t) {
@@ -619,16 +609,15 @@
     } catch (e) { }
   }
 
+  // hook into global functions that change the format or data
   function hookFn(name) {
     try {
       var fn = window[name];
       if (typeof fn === 'function') {
         window[name] = function () {
-          // capture potential format name arguments
           try {
             if (name === 'setActiveFormat' && arguments && arguments.length) { setCurrentFormat(arguments[0]); }
             if (name === 'setDiffFormat' && arguments && arguments.length) {
-              // prefer second arg as target format if present
               var toFmt = arguments[1]; var fromFmt = arguments[0];
               if (typeof toFmt === 'string') setCurrentFormat(toFmt); else if (typeof fromFmt === 'string') setCurrentFormat(fromFmt);
             }
@@ -645,19 +634,17 @@
   hookFn('updateValue');
   hookFn('onValueChanged');
 
+  // Start observing and initial setup
   var DEFAULT_BACKEND_PORT = 8001;
   function backendOrigins() {
     var list = [];
     try {
-      // Determine page context (handles blob: documents)
       var ref = (typeof document !== 'undefined' && document.referrer) ? document.referrer : '';
       var refUrl = null;
       try { if (ref) refUrl = new URL(ref); } catch (e) { }
       var locProto = (typeof location !== 'undefined' ? location.protocol : '');
       var isHttpLike = /^https?:$/.test(locProto);
       var isHttps = (locProto === 'https:') || (refUrl && refUrl.protocol === 'https:');
-
-      // 1) Meta override (explicit)
       var m = document.querySelector('meta[name="somic-backend-origin"]');
       var c = m && m.getAttribute('content');
       if (c) {
@@ -671,15 +658,12 @@
         } catch (e) { }
       }
 
-      // 2) Referrer origin (parent page that created blob)
       if (refUrl && /^https?:$/.test(refUrl.protocol)) {
         var ro = refUrl.origin; if (list.indexOf(ro) === -1) list.push(ro);
       }
 
-      // 3) Same document origin (only if http(s))
       if (isHttpLike && location.origin) { if (list.indexOf(location.origin) === -1) list.push(location.origin); }
 
-      // 4) Dev fallback to localhost:8001 only when parent or self are localhost
       try {
         var host = (refUrl && refUrl.hostname) || (location && location.hostname) || '';
         var isLocal = (host === 'localhost' || host === '127.0.0.1' || host === '::1');
@@ -693,6 +677,7 @@
     return list;
   }
 
+  // WebSocket connection with reconnection logic
   function connectWs() {
     var origins = backendOrigins();
     var idx = 0;
@@ -702,7 +687,6 @@
       var origin = origins[idx++];
       var u;
       try { u = new URL(origin); } catch (e) { return tryNext(); }
-      // Force wss when page/referrer is https to avoid mixed content
       var pageHttps = false;
       try {
         if (location && location.protocol === 'https:') pageHttps = true;
@@ -722,7 +706,7 @@
         } catch (e) { }
       };
       ws.onclose = function () {
-        if (!opened) { // failed before open -> try next origin immediately
+        if (!opened) {
           return tryNext();
         }
         wsState = 'reconnecting'; updateLegend(); setTimeout(connectWs, 2000);
@@ -738,12 +722,11 @@
     var i = 0;
     var triedRelative = false;
     function attempt() {
-      // Try same-origin relative first (works when behind reverse proxy on https)
       if (!triedRelative) {
         triedRelative = true;
         try {
           return fetch(path).then(function (r) { if (r && r.ok) return r; return attempt(); }).catch(function () { return attempt(); });
-        } catch (e) { /* fallthrough */ }
+        } catch (e) { }
       }
       if (i >= origins.length) { return Promise.reject(new Error('No backend origins reachable')); }
       var origin = origins[i++];
@@ -755,6 +738,7 @@
     return attempt();
   }
 
+  // Initial setup
   connectWs();
   observeMainTable();
   ensureLegend();
@@ -763,7 +747,6 @@
   try {
     apiFetch('/api/live-event-ids').then(function (r) { return r && r.ok ? r.json() : null; }).then(function (d) { if (d && Array.isArray(d.ids)) handleLiveIds(d.ids); });
     apiFetch('/api/format-assignments').then(function (r) { return r && r.ok ? r.json() : null; }).then(function (d) { if (d && d.assignments) handleAssignmentsUpdate(d.assignments); });
-    // Load format data once to build NR->FTL maps and detect current format
     apiFetch('/api/format-data').then(function (r) { return r && r.ok ? r.json() : null; }).then(function (d) { if (d && d.data) { buildFormatMaps(d.data); debouncedRebuild(); } });
   } catch (e) { }
 })();

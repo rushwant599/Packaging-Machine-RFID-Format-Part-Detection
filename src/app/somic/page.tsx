@@ -2,6 +2,7 @@
 import Header from "@/components/Header";
 import { useState, useEffect, useRef } from "react";
 import { useAPI } from "@/lib/api-client";
+import { useI18n } from "@/lib/i18n";
 
 type Config = {
   OPC_UA_SERVER_URL: string;
@@ -60,6 +61,7 @@ const backendUrl = ((): string => {
 })();
 
 export default function SomicPage() {
+  const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [error, setError] = useState("");
@@ -117,13 +119,13 @@ export default function SomicPage() {
       }
     } catch (err) {
       console.error("Password verification failed:", err);
-      setError("Verbindung zum Server fehlgeschlagen. Fallback wird verwendet.");
+      setError(t("server_connection_failed_fallback"));
       // Fallback to original logic if backend is not available
       if (password === "a") {
         setUnlocked(true);
         setError("");
       } else {
-        setError("Falsches Passwort!");
+        setError(t("wrong_password"));
       }
     } finally {
       setLoading(false);
@@ -155,7 +157,7 @@ export default function SomicPage() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        setSaveMsg("Configuration saved successfully.");
+        setSaveMsg(t("config_saved"));
         try {
           // Notify other open tabs/pages about the updated color so they can refresh UI
           const bc = new BroadcastChannel('somic-config-updates');
@@ -165,10 +167,10 @@ export default function SomicPage() {
           // BroadcastChannel not available in all environments; ignore
         }
       } else {
-        setSaveMsg("Failed to save configuration.");
+        setSaveMsg(t("config_failed"));
       }
     } catch {
-      setSaveMsg("Failed to save configuration.");
+      setSaveMsg(t("config_failed"));
     }
     setSaving(false);
   };
@@ -183,7 +185,7 @@ export default function SomicPage() {
         {!unlocked ? (
           <form onSubmit={handlePasswordSubmit} className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded shadow-lg p-6 flex flex-col gap-4 min-w-[320px]">
             <label className="text-gray-800 dark:text-gray-200">
-              Passwort für Somic:
+              {t("password_label")}
             </label>
             <input
               type="password"
@@ -198,7 +200,7 @@ export default function SomicPage() {
               className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
               disabled={loading}
             >
-              {loading ? "Prüfe..." : "Login"}
+              {loading ? t("checking") : t("login")}
             </button>
           </form>
         ) : (
@@ -207,7 +209,7 @@ export default function SomicPage() {
               onClick={() => setShowConfig((v) => !v)}
               className="absolute top-2 right-2 z-10 px-3 py-1 bg-gray-200  text-gray-800  rounded shadow hover:bg-blue-200 dark:hover:bg-blue-800"
             >
-              {showConfig ? "Close Settings" : "Settings"}
+              {showConfig ? t("settings_close") : t("settings_open")}
             </button>
             <iframe
               src="/somic.html"
@@ -255,11 +257,11 @@ export default function SomicPage() {
             />
             {showConfig && (
               <div className="absolute top-12 right-2 z-20 bg-white border border-gray-300 rounded shadow-lg p-6 w-[350px] max-w-full">
-                <h2 className="text-xl font-semibold mb-4 text-black">Configuration</h2>
+                <h2 className="text-xl font-semibold mb-4 text-black">{t("configuration")}</h2>
                 {/* Select File für HTML-Cache */}
                 <div className="mb-4">
                   <label htmlFor="html-upload" className="block text-sm font-medium text-black mb-1">
-                    Upload-Formatchangelist
+                    {t("upload_format_list")}
                   </label>
                   <button
                     type="button"
@@ -270,7 +272,7 @@ export default function SomicPage() {
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M7.5 12l4.5-4.5m0 0l4.5 4.5m-4.5-4.5V18" />
                     </svg>
-                    Select File
+                    {t("select_file")}
                   </button>
                   <input
                     ref={fileInputRef}
@@ -289,9 +291,9 @@ export default function SomicPage() {
                           body: formData,
                         });
                         if (res.ok) {
-                          setUploadMsg("HTML-File uploaded successfully.");
+                          setUploadMsg(t("html_upload_success"));
                         } else {
-                          setUploadMsg("Error uploading HTML-File.");
+                          setUploadMsg(t("html_upload_error"));
                         }
                         // Reset input, damit gleiche Datei erneut hochgeladen werden kann
                         e.target.value = "";
@@ -303,7 +305,7 @@ export default function SomicPage() {
                   )}
                 </div>
                 {loading ? (
-                  <p>Loading configuration...</p>
+                  <p>{t("loading_config")}</p>
                 ) : (
                   <form
                     onSubmit={(e) => {
@@ -314,7 +316,7 @@ export default function SomicPage() {
                   >
                     {/* Color Picker */}
                     <div className="flex items-center mb-2">
-                      <label htmlFor="color" className="block text-sm font-medium text-black mr-2">Color</label>
+                      <label htmlFor="color" className="block text-sm font-medium text-black mr-2">{t("color")}</label>
                       <input
                         type="color"
                         id="color"
@@ -336,7 +338,7 @@ export default function SomicPage() {
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                       />
                       <label className="ml-2 block text-sm text-black">
-                        Enable OPC UA
+                        {t("enable_opc_ua")}
                       </label>
                     </div>
                     <div className="flex items-center">
@@ -348,7 +350,7 @@ export default function SomicPage() {
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                       />
                       <label className="ml-2 block text-sm text-black">
-                        Enable OPC UA Event Listener
+                        {t("enable_opcua_event_listener")}
                       </label>
                     </div>
                     <hr className="my-2" />
@@ -372,17 +374,17 @@ export default function SomicPage() {
                         onClick={() => setOpenSection(openSection === 'opcua' ? null : 'opcua')}
                         className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
                       >
-                        <span>OPC UA Settings</span>
+                        <span>{t("opcua_settings")}</span>
                         <span>{openSection === 'opcua' ? '−' : '+'}</span>
                       </button>
                       {openSection === 'opcua' && (
                         <div className="mt-2 space-y-4">
                           <div>
-                            <label className="block text-sm font-medium text-black">OPC UA Server URL</label>
+                            <label className="block text-sm font-medium text-black">{t("opcua_server_url")}</label>
                             <input type="text" name="OPC_UA_SERVER_URL" value={config.OPC_UA_SERVER_URL} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-black">OPC UA Node ID</label>
+                            <label className="block text-sm font-medium text-black">{t("opcua_node_id")}</label>
                             <input type="text" name="OPC_UA_NODE_ID" value={config.OPC_UA_NODE_ID} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                         </div>
@@ -394,25 +396,25 @@ export default function SomicPage() {
                         onClick={() => setOpenSection(openSection === 'opcevents' ? null : 'opcevents')}
                         className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
                       >
-                        <span>OPC UA Event Listener Settings</span>
+                        <span>{t("opcua_event_listener_settings")}</span>
                         <span>{openSection === 'opcevents' ? '−' : '+'}</span>
                       </button>
                       {openSection === 'opcevents' && (
                         <div className="mt-2 space-y-4">
                           <div>
-                            <label className="block text-sm font-medium text-black">Event Server URL</label>
+                            <label className="block text-sm font-medium text-black">{t("event_server_url")}</label>
                             <input type="text" name="OPC_UA_EVENT_SERVER_URL" value={config.OPC_UA_EVENT_SERVER_URL} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-black">Event Type NodeId</label>
+                            <label className="block text-sm font-medium text-black">{t("event_type_nodeid")}</label>
                             <input type="text" name="OPC_UA_EVENT_TYPE" value={config.OPC_UA_EVENT_TYPE} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-black">Event Interval (ms)</label>
+                            <label className="block text-sm font-medium text-black">{t("event_interval_ms")}</label>
                             <input type="number" name="OPC_UA_EVENT_INTERVAL_MS" value={config.OPC_UA_EVENT_INTERVAL_MS} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-black">Max Events (Buffer)</label>
+                            <label className="block text-sm font-medium text-black">{t("max_events_buffer")}</label>
                             <input type="number" name="OPC_UA_EVENT_MAX_EVENTS" value={config.OPC_UA_EVENT_MAX_EVENTS} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
                           </div>
                         </div>
@@ -463,7 +465,7 @@ export default function SomicPage() {
                         disabled={saving}
                         className="w-full inline-flex justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                       >
-                        {saving ? "Saving..." : "Save"}
+                        {saving ? t("saving") : t("save")}
                       </button>
                     </div>
                     {saveMsg && (

@@ -1,9 +1,3 @@
-"""
-HTML Format Data Parser Module
-Handles parsing of format data from customer HTML cache files.
-"""
-
-import os
 import re
 import json
 import logging
@@ -15,23 +9,16 @@ logger = logging.getLogger(__name__)
 
 NO_HTML_FILE_MESSAGE = "No HTML file uploaded"
 
-
+# Main Parser Class
 class FormatDataParser:
-    """Parser for extracting format data from HTML files"""
     
+    # Initialization
     def __init__(self, html_file_path: str):
         self.html_file_path = Path(html_file_path)
-        # Prefer the original (uninjected) cache when typical injected cache name is provided
         self._preferred_path = self._resolve_preferred_path(self.html_file_path)
 
+    # Resolve preferred path
     def _resolve_preferred_path(self, path: Path) -> Path:
-        """Resolve to the original cache file if available.
-
-        If the provided path points to the injected cache (customer-html-cache.html
-        or customer-html-cache.injected.html), try to use the sibling original file
-        named customer-html-cache.original.html. On any failure or if not present,
-        fall back to the provided path.
-        """
         try:
             injected_names = {
                 "customer-html-cache.html",
@@ -45,8 +32,8 @@ class FormatDataParser:
             pass
         return path
     
+    # Main parsing method
     def parse(self) -> Dict[str, Any]:
-        """Main parsing method - returns complete format data"""
         try:
             html_content = self._read_html_file()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -65,13 +52,10 @@ class FormatDataParser:
             if not formats_data:
                 return {}
 
-            # Build mapping: data index (vN) -> visible value index (Nr. column)
             value_index_map = self._build_value_index_map(soup)
 
-            # Collect raw + combined parts
             collected = self._collect_all_parts(formats_data, value_index_map)
 
-            # Build complete format data structure
             format_data = {
                 'formats': formats_data,
                 'formatParts': collected['combinedParts'],
@@ -91,35 +75,35 @@ class FormatDataParser:
             logger.error(f"Error parsing format data: {e}")
             raise
     
+    # Get only the format parts data
     def get_format_parts_only(self) -> List[str]:
-        """Get only the format parts list"""
         try:
             format_data = self.parse()
             return format_data.get('formatParts', [])
         except Exception as e:
             logger.error(f"Error getting format parts: {e}")
             return []
-    
+
+    # Get only the formats data
     def get_formats_only(self) -> Dict[str, Any]:
-        """Get only the formats data"""
         try:
             format_data = self.parse()
             return format_data.get('formats', {})
         except Exception as e:
             logger.error(f"Error getting formats: {e}")
             return {}
-    
+
+    # Get only the format parts per format
     def get_format_parts_per_format(self) -> Dict[str, List[str]]:
-        """Get format parts grouped by format"""
         try:
             format_data = self.parse()
             return format_data.get('formatPartsPerFormat', {})
         except Exception as e:
             logger.error(f"Error getting format parts per format: {e}")
             return {}
-    
+
+    # Read HTML file content
     def _read_html_file(self) -> str:
-        """Read HTML file content"""
         path = getattr(self, "_preferred_path", self.html_file_path)
         if not path.exists():
             raise FileNotFoundError(f"Die Datei '{path}' wurde nicht gefunden.")
@@ -130,20 +114,19 @@ class FormatDataParser:
         except Exception as e:
             raise IOError(f"Fehler beim Lesen der Datei '{path}': {e}")
     
+    # Extract script content
     def _extract_script_content(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract script content from FormatData element"""
         script_element = soup.find(id="FormatData")
         if not script_element:
             logger.warning("FormatData script element not found")
             return None
         
         script_content = script_element.get_text(strip=True)
-        # Remove control characters
         cleaned_content = re.sub(r'[\u0000-\u001F\u007F-\u009F]', '', script_content)
         return cleaned_content
     
+    # Extract formats JSON from script content
     def _extract_formats_json(self, script_content: str) -> Optional[str]:
-        """Extract formats JSON from script content"""
         pattern = r'var\s+formats\s*=\s*({[\s\S]*?});'
         match = re.search(pattern, script_content)
         
@@ -153,21 +136,17 @@ class FormatDataParser:
         
         return match.group(1)
     
+    # Parse formats JSON string
     def _parse_formats_json(self, json_str: str) -> Optional[Dict[str, Any]]:
-        """Parse the formats JSON string"""
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
             raise ValueError(f"Fehler beim Parsen von JSON: {e}")
     
+    # Build value index map
     def _build_value_index_map(self, soup: BeautifulSoup) -> Dict[int, str]:
-        """Extract mapping from vN ids to the displayed value index (Nr.).
-        Returns dict: data_position (int) -> displayed_index (str).
-        data_position corresponds to the N of id='vN' (1-based).
-        """
         mapping: Dict[int, str] = {}
-        # Each row may contain a td with id vN and a first td with class 'value index'
         for value_cell in soup.select('td[id^="v"], td[id^="v"]'):
             vid = value_cell.get('id')
             if not vid:
@@ -179,7 +158,6 @@ class FormatDataParser:
             row = value_cell.parent
             if not row:
                 continue
-            # find first td with classes 'value' and 'index'
             idx_cell = row.find('td', class_='value index')
             if not idx_cell:
                 continue
@@ -188,15 +166,16 @@ class FormatDataParser:
                 mapping[data_pos] = displayed
         return mapping
 
+    # Collect all format parts
     def _collect_all_parts(self, formats_data: Dict[str, Any], value_index_map: Dict[int, str]) -> Dict[str, Any]:
-        """Collect raw and combined (valueIndex + part) sets and per-format mappings.
-        Returns dict with keys: rawParts, combinedParts, rawPerFormat, combinedPerFormat.
-        """
+        
+        # Compute order key
         def compute_order_key(idx: int, visible_idx: Optional[str]) -> int:
             if visible_idx and visible_idx.isdigit():
                 return int(visible_idx)
             return 10_000_000 + idx
 
+        # Extract item info
         def extract_item(idx: int, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             part = (item.get("formatPart") or "").strip()
             if not part or re.match(r'^-+$', part):
@@ -212,6 +191,7 @@ class FormatDataParser:
                 item['combinedPart'] = combined
             return {'part': part, 'combined': combined, 'order': order_key}
 
+        # Process format data items
         def process_format(data_items: List[Any]) -> List[Dict[str, Any]]:
             processed: List[Dict[str, Any]] = []
             for idx, item in enumerate(data_items):
@@ -222,6 +202,7 @@ class FormatDataParser:
                     processed.append(info)
             return processed
 
+        # Collect all parts
         raw_parts_global: set[str] = set()
         combined_index_map: Dict[str, int] = {}
         raw_per_format: Dict[str, List[str]] = {}
@@ -255,7 +236,7 @@ class FormatDataParser:
             'combinedPerFormat': combined_per_format
         }
 
-
+# Legacy function for backward compatibility
 def parse_format_data_from_file(filepath: str) -> Dict[str, Any]:
     """
     Legacy function for backward compatibility
@@ -264,26 +245,27 @@ def parse_format_data_from_file(filepath: str) -> Dict[str, Any]:
     parser = FormatDataParser(filepath)
     return parser.parse()
 
-
+# High-level Format Data Manager
 class FormatDataManager:
-    """High-level manager for format data operations"""
     
+    # Initialization
     def __init__(self, cache_file_path: str):
         self.cache_file_path = Path(cache_file_path)
         self._parser: Optional[FormatDataParser] = None
     
+    # Get or create parser instance
     def _get_parser(self) -> FormatDataParser:
-        """Get or create parser instance"""
         if self._parser is None:
             self._parser = FormatDataParser(str(self.cache_file_path))
         return self._parser
-    
+
+    # Check if the cache file exists
     def file_exists(self) -> bool:
-        """Check if the cache file exists"""
         return self.cache_file_path.exists()
     
+    # Public API methods
+    # Get full format data
     def get_format_data(self) -> Dict[str, Any]:
-        """Get complete format data"""
         if not self.file_exists():
             return {}
         
@@ -293,8 +275,8 @@ class FormatDataManager:
             logger.error(f"Error getting format data: {e}")
             return {}
     
+    # Get format parts with metadata
     def get_format_parts(self) -> Dict[str, Any]:
-        """Get format parts with metadata"""
         if not self.file_exists():
             return {
                 "formatParts": [],
@@ -317,8 +299,8 @@ class FormatDataManager:
                 "error": str(e)
             }
     
+    # Get formats with metadata
     def get_formats(self) -> Dict[str, Any]:
-        """Get formats with metadata"""
         if not self.file_exists():
             return {
                 "formats": {},
@@ -326,7 +308,6 @@ class FormatDataManager:
                 "count": 0,
                 "message": NO_HTML_FILE_MESSAGE
             }
-        
         try:
             formats = self._get_parser().get_formats_only()
             return {
@@ -344,15 +325,14 @@ class FormatDataManager:
                 "error": str(e)
             }
     
+    # Get format parts per format with metadata
     def get_format_parts_per_format(self) -> Dict[str, Any]:
-        """Get format parts per format with metadata"""
         if not self.file_exists():
             return {
                 "formatPartsPerFormat": {},
                 "formatCount": 0,
                 "message": NO_HTML_FILE_MESSAGE
             }
-        
         try:
             format_parts_per_format = self._get_parser().get_format_parts_per_format()
             return {
@@ -368,8 +348,8 @@ class FormatDataManager:
                 "error": str(e)
             }
 
+    # Get format parts per format with index
     def get_format_parts_per_format_with_index(self) -> Dict[str, Any]:
-        """Get combined (valueIndex + part) format parts per format with metadata"""
         if not self.file_exists():
             return {
                 "formatPartsPerFormatWithIndex": {},

@@ -278,12 +278,24 @@ export default function CustomerPage() {
       .then((res) => (res.ok ? res.text() : null))
       .then((html) => {
         if (html) {
+          // Inject a meta with backend origin so injected JS (somic-rfid.js) can resolve the correct host:port
+          // This is critical when the page is served via a random mapped port.
+          let injectedHtml = html;
+          try {
+            const safeOrigin = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? BACKEND_URL : (typeof window !== 'undefined' ? window.location.origin : '');
+            if (safeOrigin && /<head\b[^>]*>/i.test(injectedHtml)) {
+              injectedHtml = injectedHtml.replace(/<head(\b[^>]*)>/i, `<head$1><meta name="somic-backend-origin" content="${safeOrigin}">`);
+            } else if (safeOrigin) {
+              // Fallback: prepend meta if no <head> tag present
+              injectedHtml = `<meta name="somic-backend-origin" content="${safeOrigin}">` + injectedHtml;
+            }
+          } catch { /* ignore */ }
           // Erzeuge ein Blob-URL für das HTML
-          const blob = new Blob([html], { type: "text/html" });
+          const blob = new Blob([injectedHtml], { type: "text/html" });
           setFileUrl(URL.createObjectURL(blob));
           try {
             // Versuche Footer-Block aus dem HTML zu extrahieren (inkl. <footer>..</footer>)
-            const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(html);
+            const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(injectedHtml);
             if (m && m[0]) setFooterHtml(m[0]);
             else setFooterHtml(null);
           } catch {

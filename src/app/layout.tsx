@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: "Somic RFID Management System",
 };
 
+// Root Layout Component
 export default function RootLayout({
   children,
 }: Readonly<{

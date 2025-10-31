@@ -229,28 +229,26 @@ type I18nContextValue = {
 
 const I18nContext = React.createContext<I18nContextValue | undefined>(undefined);
 
+// Detect initial language preference
 function detectInitialLang(): Lang {
   try {
-    // 1) URL ?lang=de|en
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
       const q = (p.get("lang") || "").toLowerCase();
       if (q === "de" || q === "en") return q;
     }
-    // 2) localStorage
     if (typeof window !== "undefined") {
       const stored = window.localStorage.getItem("lang");
       if (stored === "de" || stored === "en") return stored;
     }
-    // 3) Browser language
     const nav = typeof navigator !== "undefined" ? navigator.language : "en";
     if ((nav || "").toLowerCase().startsWith("de")) return "de";
   } catch {
-    // ignore
   }
   return "en";
 }
 
+// I18nProvider component that provides internationalization context to its children
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = React.useState<Lang>(detectInitialLang());
 
@@ -264,16 +262,13 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         document.documentElement.lang = l;
       }
     } catch {
-      // ignore
     }
   }, []);
 
   React.useEffect(() => {
-    // ensure <html lang> reflects current
     try {
       document.documentElement.lang = lang;
     } catch {
-      // ignore
     }
   }, [lang]);
 
@@ -287,6 +282,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
+// Custom hook to access the I18n context
 export function useI18n() {
   const ctx = React.useContext(I18nContext);
   if (!ctx) throw new Error("useI18n must be used within I18nProvider");

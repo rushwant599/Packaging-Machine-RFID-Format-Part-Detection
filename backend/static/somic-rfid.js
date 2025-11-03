@@ -159,6 +159,21 @@
   var map = buildMap();
   var wsState = 'connecting';
 
+  // Build a Set of all normalized tag IDs that are assigned to any format part/key
+  function getAssignedTagSet() {
+    var set = new Set();
+    try {
+      Object.keys(assignments || {}).forEach(function (k) {
+        var v = assignments[k];
+        var raw = null;
+        if (typeof v === 'string') raw = v; else if (v && typeof v === 'object') raw = v.rfid_tag_id || v.rfidTagId || v.tagId || null;
+        var n = raw ? normalizeTag(raw) : null;
+        if (n) set.add(n);
+      });
+    } catch (e) { }
+    return set;
+  }
+
   // --- Format JSON handling (active format -> NR to FTL mapping) ---
   var formatMaps = { byFormat: {}, names: [] };
   var currentFormat = null;
@@ -337,8 +352,9 @@
         if (norm) expected.add(norm);
       });
       var wrong = 0;
+      var assignedSet = getAssignedTagSet();
       if (liveSet && typeof liveSet.forEach === 'function') {
-        liveSet.forEach(function (t) { if (!expected.has(t)) wrong++; });
+        liveSet.forEach(function (t) { if (assignedSet.has(t) && !expected.has(t)) wrong++; });
       }
       return wrong;
     } catch (e) { return 0; }
@@ -366,14 +382,12 @@
       } catch (e) { }
       if (liveSet && typeof liveSet.forEach === 'function') {
         liveSet.forEach(function (t) {
-          if (!expected.has(t)) {
+          if (!expected.has(t) && rev[t] && rev[t].length) {
             var keys = rev[t] || [];
             var raw = null;
-            if (keys.length) {
-              for (var i = 0; i < keys.length && !raw; i++) {
-                var kv = assignments[keys[i]];
-                if (typeof kv === 'string') raw = kv; else if (kv && typeof kv === 'object') raw = kv.rfid_tag_id || kv.rfidTagId || kv.tagId || null;
-              }
+            for (var i = 0; i < keys.length && !raw; i++) {
+              var kv = assignments[keys[i]];
+              if (typeof kv === 'string') raw = kv; else if (kv && typeof kv === 'object') raw = kv.rfid_tag_id || kv.rfidTagId || kv.tagId || null;
             }
             details.push({ keys: keys, tagRaw: raw, tagNorm: t });
           }
@@ -465,7 +479,16 @@
       dot.style.background = color;
       dot.title = t('ws_prefix') + wsState;
     }
-    if (live) { live.textContent = '(' + t('live') + ': ' + (liveSet ? liveSet.size : 0) + ')'; }
+    if (live) {
+      var assignedSet = getAssignedTagSet();
+      var liveAssigned = 0;
+      try {
+        if (liveSet && typeof liveSet.forEach === 'function') {
+          liveSet.forEach(function (t) { if (assignedSet.has(t)) liveAssigned++; });
+        }
+      } catch (e) { }
+      live.textContent = '(' + t('live') + ': ' + liveAssigned + ')';
+    }
     if (wrong) {
       var wdetails = computeWrongDetails();
       wrong.textContent = '(' + t('wrong') + ': ' + (wdetails ? wdetails.length : 0) + ')';

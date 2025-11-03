@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from
 import { apiClient, BACKEND_URL } from "@/lib/api-client";
 import { useI18n } from "@/lib/i18n";
 
-// -------------------- Typdefinitionen --------------------
+// Typdefinitionen
 interface RowMeta {
   row_type: 'caption_line' | 'caption' | 'data';
   text?: string;
@@ -16,9 +16,9 @@ interface RowMeta {
 interface FormatItem {
   value?: string;
   formatValue?: string;
-  valueIndex?: string; // sichtbare Nummer
-  formatPart?: string; // FTL.
-  cart?: string;       // Wagen
+  valueIndex?: string; 
+  formatPart?: string;
+  cart?: string;
   [k: string]: unknown;
 }
 
@@ -55,11 +55,10 @@ interface Step extends StepBase {
   _injectedValue?: boolean;
   _prevValue?: string;
   _rfidStatus?: RFIDStatus;
-  // Optional: bei Wechsel-Modus Quelle-Zellen behalten (vorherige Formatwerte)
   _fromCells?: string[];
 }
 
-// ---------- Responsive Utilities ----------
+// Responsive Utilities 
 function useViewport() {
   const [width, setWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1920);
   useEffect(() => {
@@ -70,12 +69,13 @@ function useViewport() {
   return { width, isMobile: width < 640, isTablet: width >= 640 && width < 1024 };
 }
 
-// ---------- HTML parsing helpers (extracted to reduce cognitive complexity) ----------
+// HTML parsing helpers (extracted to reduce cognitive complexity)
 const ICON_IMG_REGEX = /<img([^>]*class="[^"]*icon[^"]*"[^>]*)>/gi;
 const GENERIC_IMG_REGEX = /<img(?![^>]*icon)([^>]*)>/gi;
 const TD_CELL_REGEX_GLOBAL = /<td[^>]*>[\s\S]*?<\/td>/gi;
 const TD_CELL_REGEX_SINGLE = /<td[^>]*>([\s\S]*?)<\/td>/i;
 
+// Normalisiere Bild-Tags in einem HTML-Block (Icon und generische Bilder)
 function normalizeImagesBlock(html: string) {
   return html
     .replace(ICON_IMG_REGEX, (_, attrs) => {
@@ -88,6 +88,7 @@ function normalizeImagesBlock(html: string) {
     });
 }
 
+// Extrahiere Zellen-Inhalte aus einer rohen HTML-Tabellenzeile
 function extractCells(rawTr: string): string[] {
   const matches = rawTr.match(TD_CELL_REGEX_GLOBAL) || [];
   return matches.map(td => {
@@ -96,6 +97,7 @@ function extractCells(rawTr: string): string[] {
   });
 }
 
+// Baue HTML für eine Step-Zeile vom Typ "line"
 function buildLineRowHtml(raw: string | undefined, fontSize: string): string | undefined {
   if (!raw) return raw;
   const cells = extractCells(raw);
@@ -113,10 +115,11 @@ function buildLineRowHtml(raw: string | undefined, fontSize: string): string | u
     + `</div>`;
 }
 
+// Bereite Steps aus rohen RowMeta-Daten vor
 function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
   const prepared: Step[] = [];
   let currentSection: string | null = null;
-  let currentHeaderCells: string[] | undefined; // persistent header
+  let currentHeaderCells: string[] | undefined;
   let currentSubSection: string | null = null;
   let currentLineHtml: string | undefined;
   rowsMeta.forEach((row: RowMeta, idx: number) => {
@@ -176,10 +179,10 @@ function prepareSteps(rowsMeta: RowMeta[], fontSize: string): Step[] {
   return prepared;
 }
 
+// Hauptkomponente für die Kundenansicht
 export default function CustomerPage() {
   const { t, lang } = useI18n();
   const { isMobile, isTablet, width } = useViewport();
-  // Fetch color from config
   const [color, setColor] = React.useState<string>("#1976d2");
   React.useEffect(() => {
     const url = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? `${BACKEND_URL}/api/config` : '/api/config';
@@ -192,7 +195,6 @@ export default function CustomerPage() {
       .catch(() => { /* ignore errors silently */ });
   }, []);
 
-  // Listen for color updates from settings (other tabs/pages)
   useEffect(() => {
     try {
       const bc = new BroadcastChannel('somic-config-updates');
@@ -203,13 +205,11 @@ export default function CustomerPage() {
       bc.addEventListener('message', onMsg);
       return () => { bc.removeEventListener('message', onMsg); bc.close(); };
     } catch {
-      // BroadcastChannel not supported; ignore
       return () => { };
     }
   }, []);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [footerHtml, setFooterHtml] = useState<string | null>(null);
-  // Upload/Kamera State
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadPartId] = useState<string | null>(null);
   const [uploadMsg, setUploadMsg] = useState<string>("");
@@ -219,22 +219,17 @@ export default function CustomerPage() {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
-  // Anleitung standardmäßig ausgeblendet
   const [showSteps, setShowSteps] = useState(false);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState<string | null>(null);
-  // Format Auswahl
   const [formats, setFormats] = useState<Record<string, unknown>>({});
   const [formatNames, setFormatNames] = useState<string[]>([]);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
-  // Neuer Wechsel / Diff Modus
   const [fromFormat, setFromFormat] = useState<string | null>(null);
   const [toFormat, setToFormat] = useState<string | null>(null);
-  const [diffMode, setDiffMode] = useState<boolean>(false); // Wenn aktiv: zeige nur Schritte mit Unterschieden zwischen zwei Formaten
+  const [diffMode, setDiffMode] = useState<boolean>(false);
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
-  // Layout / Style Konstanten für den Step-Block (responsive)
-  // Dynamische Schriftgröße anhand verfügbarer Breite (clamp Logik)
   const STEP_FONT_SIZE = React.useMemo(() => {
     if (width < 380) return '.58rem';
     if (width < 440) return '.62rem';
@@ -244,11 +239,10 @@ export default function CustomerPage() {
     if (width < 1100) return '.88rem';
     return '.95rem';
   }, [width]);
-  // Tabellen-Skalierung (horizontale Anpassung): skaliert Tabelle proportional, wenn sie breiter ist als Container
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const [tableScale, setTableScale] = useState(1);
-  const compactTable = width < 560; // Kompakter Modus: volle Breite, Wrap statt horizontalem Scroll
+  const compactTable = width < 560;
   useLayoutEffect(() => {
     if (compactTable) { setTableScale(1); return; }
     const cont = tableContainerRef.current;
@@ -261,7 +255,6 @@ export default function CustomerPage() {
     const clamped = scale < 1 ? Math.max(scale, 0.55) : 1;
     setTableScale(clamped);
   }, [width, isMobile, isTablet, STEP_FONT_SIZE, compactTable]);
-  // Optionale feste Spaltenbreiten (Reihenfolge wie Header: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung)
   type ColWidths = (string | number)[];
   const COLUMN_WIDTHS_BY_COUNT: Record<number, ColWidths> = {
     // 6 Spalten: Nr. | Umstellpunkt | Wert | FTL. | Wagen | Bemerkung
@@ -269,8 +262,6 @@ export default function CustomerPage() {
     // 5 Spalten: Nr. | Umstellpunkt | Wert | FTL. | Bemerkung
     5: ['6%', '52%', '11%', '11%', '20%'],
   };
-  // RFID Status-Spalte wird dynamisch angezeigt, kein Konstante nötig
-  // Farb-Konfiguration könnte später über Settings kommen (derzeit direkt im JSX benutzt)
 
   // Beim Laden die aktuelle Datei vom Server holen
   useEffect(() => {
@@ -278,23 +269,18 @@ export default function CustomerPage() {
       .then((res) => (res.ok ? res.text() : null))
       .then((html) => {
         if (html) {
-          // Inject a meta with backend origin so injected JS (somic-rfid.js) can resolve the correct host:port
-          // This is critical when the page is served via a random mapped port.
           let injectedHtml = html;
           try {
             const safeOrigin = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? BACKEND_URL : (typeof window !== 'undefined' ? window.location.origin : '');
             if (safeOrigin && /<head\b[^>]*>/i.test(injectedHtml)) {
               injectedHtml = injectedHtml.replace(/<head(\b[^>]*)>/i, `<head$1><meta name="somic-backend-origin" content="${safeOrigin}">`);
             } else if (safeOrigin) {
-              // Fallback: prepend meta if no <head> tag present
               injectedHtml = `<meta name="somic-backend-origin" content="${safeOrigin}">` + injectedHtml;
             }
           } catch { /* ignore */ }
-          // Erzeuge ein Blob-URL für das HTML
           const blob = new Blob([injectedHtml], { type: "text/html" });
           setFileUrl(URL.createObjectURL(blob));
           try {
-            // Versuche Footer-Block aus dem HTML zu extrahieren (inkl. <footer>..</footer>)
             const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(injectedHtml);
             if (m && m[0]) setFooterHtml(m[0]);
             else setFooterHtml(null);
@@ -305,7 +291,7 @@ export default function CustomerPage() {
       });
   }, []);
 
-  // Page Scroll komplett deaktivieren (nur interne Container / iframe dürfen scrollen)
+  // Page Scroll komplett deaktivieren
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
@@ -354,7 +340,6 @@ export default function CustomerPage() {
     const loadFormats = async () => {
       setFormatLoading(true); setFormatError(null);
       try {
-        // Verwende Backend API Client (verhindert 404 auf Next.js eigener /api Route)
         const json = await apiClient.getFormats() as { formats?: Record<string, unknown> };
         const fmts = json.formats || {};
         setFormats(fmts);
@@ -386,8 +371,7 @@ export default function CustomerPage() {
     return () => { cancelled = true; };
   }, [selectedFormat]);
 
-  // Werte aus gewähltem Format in Steps projizieren (nutzt valueIndexMap + items)
-  // Hilfsfunktion: injiziert Werte eines bestimmten Formats in eine Kopie der Steps und liefert Map index->cells
+  // Hilfsfunktion: Injiziere Formatwerte in Steps zurück
   const injectFormat = useCallback((formatName: string | null) => {
     if (!formatName || !formats[formatName]) return new Map<number, { cells: string[]; injected?: boolean }>();
     const fmt = formats[formatName];
@@ -424,7 +408,7 @@ export default function CustomerPage() {
       const val = numberToValue[nr];
       const ftl = numberToFTL[nr];
       const cart = numberToCart[nr];
-      if (!val && !ftl && !cart) return; // Keine Änderungen
+      if (!val && !ftl && !cart) return;
       const copy = [...s.cells];
       if (val) copy[2] = val;
       if (ftl) copy[3] = ftl;
@@ -436,22 +420,19 @@ export default function CustomerPage() {
 
   // Enriched Steps (Single Format) oder Unterschieds-Liste bei diffMode
   const enrichedSteps = React.useMemo(() => {
-    // Wechselmodus aktiv? -> Filter nur veränderte data Steps behalten (plus alle line Steps)
     if (diffMode && fromFormat && toFormat && fromFormat !== toFormat) {
       const fromMap = injectFormat(fromFormat);
       const toMap = injectFormat(toFormat);
       const filtered: Step[] = [];
       steps.forEach(s => {
-        if (s.kind === 'line') { // Linien immer behalten
+        if (s.kind === 'line') { 
           filtered.push(s);
           return;
         }
         if (s.kind === 'data') {
           const fromEntry = fromMap.get(s.index);
           const toEntry = toMap.get(s.index);
-          // Falls Ziel ohne Änderung -> Schritt überspringen
-          if (!toEntry && !fromEntry) return; // Keine Änderung in beiden
-          // Entscheide ob relevante Spalten geändert wurden (2=Wert,3=FTL.,4=Wagen)
+          if (!toEntry && !fromEntry) return;
           const baseCells = [...s.cells];
           const fromCells = fromEntry ? fromEntry.cells : baseCells;
           const toCells = toEntry ? toEntry.cells : baseCells;
@@ -464,7 +445,6 @@ export default function CustomerPage() {
       });
       return filtered;
     }
-    // Normaler Einzel-Format Modus
     if (!selectedFormat || !formats[selectedFormat]) return steps;
     const singleMap = injectFormat(selectedFormat);
     return steps.map(s => {
@@ -476,10 +456,9 @@ export default function CustomerPage() {
     });
   }, [steps, selectedFormat, formats, diffMode, fromFormat, toFormat, injectFormat]);
 
-  // --- RFID Assignments + Live Sichtbarkeit ---
-  const [assignments, setAssignments] = React.useState<AssignmentsMap>({}); // format_part -> { rfid_tag_id }
+  // RFID Assignments + Live Sichtbarkeit
+  const [assignments, setAssignments] = React.useState<AssignmentsMap>({});
   const [liveEventTagIds, setLiveEventTagIds] = React.useState<Set<string>>(new Set());
-  // Einheitliche Normalisierung für Tag-IDs (robust gegen Bindestriche/Leerzeichen etc.)
   const normalizeTagId = useCallback((t: unknown) => {
     return (t ?? '')
       .toString()
@@ -487,7 +466,6 @@ export default function CustomerPage() {
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '');
   }, []);
-  // Assignments nur beim (erstmaligen) Laden und wenn Format gewechselt wird holen (statt Dauer-Polling)
   useEffect(() => {
     let cancelled = false;
     const fetchOnce = async () => {
@@ -499,17 +477,14 @@ export default function CustomerPage() {
     fetchOnce();
     return () => { cancelled = true; };
   }, [selectedFormat]);
-  // WebSocket für Live-Event-IDs (aus /api/live-event-ids) + Assignments Updates
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closed = false;
-    // Resolve a base HTTP URL once for both WS and initial snapshot
     let resolvedBaseHttp = '';
     try {
         let tmp = process.env.NEXT_PUBLIC_BACKEND_URL || '';
         if (!tmp) {
           try {
-            // Prefer the full origin (protocol + host + port) so mapped ports like :4444 are preserved
             if (typeof window !== 'undefined' && window.location && window.location.origin) {
               tmp = window.location.origin;
             } else {
@@ -523,8 +498,9 @@ export default function CustomerPage() {
         }
       resolvedBaseHttp = tmp;
     } catch {
-      // ignore
     }
+
+    // WebSocket-Verbindung aufbauen und Nachrichten verarbeiten
     const connect = () => {
       try {
         const base = resolvedBaseHttp.replace(/^http/, 'ws');
@@ -535,13 +511,10 @@ export default function CustomerPage() {
             const raw = JSON.parse(ev.data) as unknown;
             if (typeof raw !== 'object' || raw === null) return;
             const msg = raw as Record<string, unknown>;
-            // Quelle für Live-Anzeige ist ausschließlich der WS-Stream "live_event_ids",
-            // der semantisch den HTTP-Endpoint /api/live-event-ids widerspiegelt.
             if (msg.type === 'live_event_ids' && Array.isArray(msg.ids)) {
               const norm = (msg.ids as unknown[])
                 .map(t => normalizeTagId(t))
                 .filter((t: string) => t.length > 0);
-              // Immer neue Set-Instanz erzeugen, damit React Referenzänderung erkennt
               setLiveEventTagIds(new Set(norm));
             } else if (msg.type === 'assignments_update' && msg.assignments) {
               setAssignments(msg.assignments as AssignmentsMap);
@@ -552,7 +525,6 @@ export default function CustomerPage() {
       } catch { }
     };
     connect();
-    // Initial HTTP snapshot so UI shows immediately without manual refresh
     (async () => {
       try {
         const httpBase = resolvedBaseHttp || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '');
@@ -566,14 +538,12 @@ export default function CustomerPage() {
     return () => { closed = true; if (ws) ws.close(); };
   }, [normalizeTagId]);
 
-  // Hilfsfunktion: aus Datenzeile (Nr. + FTL.) einen FormatPart-Key ableiten wie in Assignments (combinedPerFormat nutzt "<valueIndex> <part>")
+  // Hilfsfunktion: Ableitung des FormatPart Keys für RFID-Zuordnungen
   const deriveFormatPartKey = (row: Step): string | null => {
     if (!row || row.kind !== 'data') return null;
     const nrRaw = (row.cells?.[0] || '').toString().trim();
     const ftlRaw = (row.cells?.[3] || '').toString().trim();
     if (!nrRaw || !ftlRaw) return null;
-    // Primärschlüssel wie gespeichert: "<sichtbare Zahl> <formatPart>" (Original: valueIndex + part)
-    // Falls Original evtl. ohne Normalisierung gespeichert wurde, erzeugen wir mehrere Varianten beim Lookup.
     return `${nrRaw} ${ftlRaw}`.trim();
   };
 
@@ -592,7 +562,6 @@ export default function CustomerPage() {
         const alt2 = key.replace(/\./g, '').replace(/\s+/g, ' ').trim();
         assignment = assignments[alt2];
       }
-      // assignment kann string oder objekt sein
       const rawTagId = typeof assignment === 'string'
         ? assignment
         : (assignment?.rfid_tag_id ?? (assignment as AssignmentsMapEntry | undefined)?.rfidTagId);
@@ -607,7 +576,7 @@ export default function CustomerPage() {
     });
   }, [enrichedSteps, assignments, liveEventTagIds, normalizeTagId]);
 
-  // --- Upload & Kamera Helpers/Handlers (after dependencies) ---
+  // Upload & Kamera Helpers/Handlers (after dependencies)
   const sanitizePart = useCallback((s: string) => s.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100), []);
   const isSecureForCamera = useCallback(() => {
     if (typeof window === 'undefined') return false;
@@ -615,7 +584,7 @@ export default function CustomerPage() {
     return protocol === 'https:' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
   }, []);
 
-
+  // Kamera stoppen
   const stopCamera = useCallback(() => {
     if (mediaStream) {
       try { mediaStream.getTracks().forEach(t => t.stop()); } catch { }
@@ -632,22 +601,20 @@ export default function CustomerPage() {
     setUploadMsg("");
   }, [stopCamera]);
 
-  // Hilfsfunktion: Ableitung des Picture-Part Keys (Anlehnung an vorhandene Dateien z.B. 1_01-01_...)
+  // Cache für geladene Bilder pro FormatPart
   const derivePicturePartKey = useCallback((row: Step | undefined): string | null => {
     if (!row || row.kind !== 'data') return null;
-    // Erwartete Struktur: cells[0] = Nr., cells[3] = FTL. (Formatteil). Nur laden wenn beides sinnvoll befüllt ist.
     const nr = (row.cells?.[0] || '').toString().trim();
     const ftl = (row.cells?.[3] || '').toString().trim();
     if (!nr || !ftl) return null;
-    // Ignore offensichtliche Platzhalter wie 'FTL.' oder 'FTL'
     const ftlLower = ftl.toLowerCase();
     if (ftlLower === 'ftl.' || ftlLower === 'ftl') return null;
-    // Schlüssel-Konvention: <Nr>_<FTL>
     const raw = `${nr}_${ftl}`;
     const cleaned = raw.replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 100);
     return cleaned || null;
   }, []);
 
+  // Aktuelle Bilder für den angezeigten Step
   const onFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       const files = e.target.files;
@@ -666,14 +633,11 @@ export default function CustomerPage() {
       const json = await resp.json() as { success?: boolean; filename?: string };
       if (!json?.success || !json.filename) throw new Error(t('unexpected_server_response'));
       setUploadMsg(`${t('upload_success')} ${json.filename}`);
-      // Bildliste aktualisieren (zeige neuestes Bild)
       picturesCacheRef.current.set(part, [json.filename]);
-      // Wenn aktueller Step zum gleichen Part gehört, aktualisieren
       const curKey = derivePicturePartKey(stepsWithStatus[currentStep]);
       if (curKey && sanitizePart(curKey) === part) {
         setCurrentPictures([json.filename]);
       }
-      // Reset file input
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -681,6 +645,7 @@ export default function CustomerPage() {
     }
   }, [uploadPartId, currentStep, stepsWithStatus, sanitizePart, derivePicturePartKey, t]);
 
+  // Kamera starten
   const toggleCamera = useCallback(async () => {
     try {
       if (mediaStream) { setUploadMsg(t('camera_already_active')); return; }
@@ -704,6 +669,7 @@ export default function CustomerPage() {
     }
   }, [mediaStream, isSecureForCamera, t]);
 
+  // Foto aufnehmen und hochladen
   const takeSnapshot = useCallback(async () => {
     try {
       if (!mediaStream || !videoRef.current) { setUploadMsg(t('camera_not_active')); return; }
@@ -730,7 +696,6 @@ export default function CustomerPage() {
       const json = await resp.json() as { success?: boolean; filename?: string };
       if (!json?.success || !json.filename) throw new Error(t('unexpected_server_response'));
       setUploadMsg(`${t('photo_saved')}: ${json.filename}`);
-      // Update pictures
       picturesCacheRef.current.set(part, [json.filename]);
       const curKey = derivePicturePartKey(stepsWithStatus[currentStep]);
       if (curKey && sanitizePart(curKey) === part) {
@@ -743,12 +708,11 @@ export default function CustomerPage() {
     }
   }, [mediaStream, uploadPartId, currentStep, stepsWithStatus, sanitizePart, stopCamera, derivePicturePartKey, t]);
 
-  // Separater Satz für Statistik: im diffMode immer komplette Ziel-Format-Injektion statt gefilterter Unterschiede
+  // Steps mit Status für Statistik-Übersicht
   const statsStepsWithStatus: Step[] = React.useMemo(() => {
     if (!(diffMode && toFormat && toFormat !== fromFormat)) {
-      return stepsWithStatus; // normaler Modus nutzt sichtbare Steps
+      return stepsWithStatus;
     }
-    // Volle Kopie aller Steps mit Ziel-Format-Injektion
     const targetMap = injectFormat(toFormat);
     const fullInjected = steps.map<Step>(s => {
       if (s.kind !== 'data') return s;
@@ -756,7 +720,6 @@ export default function CustomerPage() {
       if (!m) return s;
       return { ...s, cells: m.cells };
     });
-    // Status darauf berechnen (gleiche Logik wie oben, dupliziert für Klarheit)
     return fullInjected.map<Step>(s => {
       if (s.kind !== 'data' || !s.cells.length) return s;
       const key = deriveFormatPartKey(s);
@@ -784,10 +747,8 @@ export default function CustomerPage() {
 
   const current = stepsWithStatus[currentStep];
   const totalSteps = stepsWithStatus.length;
-  // Bild-Preview Overlay
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const htmlIframeRef = useRef<HTMLIFrameElement | null>(null);
-  // Dynamische Max-Höhe für Inline-Bild (kein Scroll nötig)
   const inlineImageMaxHeight = React.useMemo(() => {
     if (width < 480) return '26vh';
     if (width < 680) return '30vh';
@@ -801,7 +762,7 @@ export default function CustomerPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Keep iframe language in sync when toggled
+  // Sprache an Iframe senden
   useEffect(() => {
     try {
       type IframeWin = Window & { setLanguage?: (l: string) => void };
@@ -814,7 +775,7 @@ export default function CustomerPage() {
     } catch { /* ignore */ }
   }, [lang]);
 
-  // --- Bilder für aktuellen Schritt ---
+  // Bilder für aktuellen Schritt
   const [currentPictures, setCurrentPictures] = useState<string[]>([]);
   const [pictureLoading, setPictureLoading] = useState(false);
   const picturesCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -834,7 +795,6 @@ export default function CustomerPage() {
     apiClient.getPicturesByPart(key)
       .then(resp => {
         const list = Array.isArray(resp?.files) ? resp.files : [];
-        // Backend liefert sortiert (lexikographisch). Neueste = letzte (Timestamp im Namen).
         const newest = list.length ? list[list.length - 1] : undefined;
         const single = newest ? [newest] : [];
         picturesCacheRef.current.set(key, single);
@@ -871,12 +831,13 @@ export default function CustomerPage() {
       return next;
     });
   }, [totalSteps]);
-  // Falls sich die sichtbare Länge ändert (z.B. Wechsel-Modus), Index einklappen
   useEffect(() => {
     if (currentStep >= totalSteps) {
       setCurrentStep(Math.max(0, totalSteps - 1));
     }
   }, [totalSteps, currentStep]);
+
+  // Haupt-Render
   return (
     <div className="flex flex-col bg-white dark:bg-black" style={{ height: '100dvh', overflow: 'hidden' }}>
       <Header profile="Customer" />
@@ -1010,8 +971,6 @@ export default function CustomerPage() {
                                   lineHeight: 1.25,
                                   verticalAlign: 'top'
                                 };
-                                // Apply color to FTL. column
-                                // Todo: Improve logic to detect FTL./Nr. column 
                                 if (current.headerCells && current.headerCells[i] && current.headerCells[i].toLowerCase().replace(/\./g, "") === "nr") {
                                   cellStyle = { ...cellStyle, background: color, color: '#fff', fontWeight: 600 };
                                 }
@@ -1028,7 +987,6 @@ export default function CustomerPage() {
                                 const rs = current._rfidStatus;
                                 let rfidColor = '#666';
                                 if (rs.tagId) rfidColor = rs.seen ? '#0a7a15' : '#b30000';
-                                // Background color by symbol/state
                                 let bg = '#fff';
                                 if (rs.tagId) {
                                   bg = rs.seen ? '#99e47cff' : '#ec7e7eff';
@@ -1065,25 +1023,11 @@ export default function CustomerPage() {
                     </div>
                   )}
                   {/* Bilder Bereich */}
-                  {/* Bilder nur anzeigen, wenn es sich um einen echten Formatteil handelt UND mindestens 1 Bild vorhanden oder gerade lädt */}
                   {current.kind === 'data' && (() => {
                     const key = derivePicturePartKey(current);
-                    if (!key) return null; // kein echtes Formatteil
+                    if (!key) return null;
                     return (
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {/*
-                      {/* Upload/Aktionen 
-                      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => { setUploadPartId(key); setUploadOpen(true); setUploadMsg(""); }}
-                          style={{ fontSize: '.7rem', padding:'4px 8px', background:'#f4f4f4', color:'#000', border:'1px solid #bbb', borderRadius:4, cursor:'pointer' }}
-                        >Upload</button>
-                        {uploadOpen && uploadPartId === key && (
-                          <span style={{ fontSize:'.65rem', color:'#000' }}>{uploadMsg}</span>
-                        )}
-                      </div>
-                      */}
                         {pictureLoading && <div style={{ fontSize: STEP_FONT_SIZE, color: '#555' }}>{t('loading_image')}</div>}
                         {!pictureLoading && currentPictures.length > 0 && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

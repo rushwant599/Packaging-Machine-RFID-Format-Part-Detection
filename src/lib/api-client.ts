@@ -1,13 +1,6 @@
-// API client for Python backend
-// Problem bisher: Bei Zugriff von einem anderen Gerät im LAN zeigt 'localhost:8001' auf das dortige Gerät statt auf den Server.
-// Lösung: Falls NEXT_PUBLIC_BACKEND_URL nicht gesetzt ist, dynamisch die Host-IP/Domain des Frontends nutzen.
-// Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
 const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
 
-// Prefer explicit NEXT_PUBLIC_BACKEND_URL when provided (for CI/docker overrides).
-// Otherwise, in the browser prefer the full origin (protocol + host + port) so the frontend
-// makes requests to the same origin the user used to open the app (works with nginx port mapping).
 if (!resolvedBase && typeof window !== 'undefined') {
   try {
     const origin = window.location.origin;
@@ -15,13 +8,11 @@ if (!resolvedBase && typeof window !== 'undefined') {
       resolvedBase = origin;
     }
   } catch {
-    // ignore and fallback below
   }
 }
 
-// Fallback (Dev Einzelstart): explicit backend port or localhost
 export const BACKEND_URL = resolvedBase || `http://localhost:${backendPort}`;
-// Optional: kurze Debug-Ausgabe einmalig
+
 declare global {
   interface Window { __BACKEND_URL_LOGGED__?: boolean }
 }
@@ -127,6 +118,7 @@ class APIClient {
     return response.text();
   }
 
+  // Upload customer HTML file
   async uploadCustomerHTML(file: File): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
@@ -145,10 +137,6 @@ class APIClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
-  }
-
-  async getRFIDTags(): Promise<RFIDTag[]> {
-    return this.request<RFIDTag[]>('/api/rfid/tags');
   }
 
   // Format data operations
@@ -173,10 +161,12 @@ class APIClient {
     return this.request(endpoint);
   }
 
+  // Formats
   async getFormats() {
     return this.request('/api/formats');
   }
 
+  // Format parts per format
   async getFormatPartsPerFormat() {
     return this.request('/api/format-parts-per-format');
   }
@@ -185,23 +175,26 @@ class APIClient {
   async getFormatAssignments() {
     return this.request('/api/format-assignments');
   }
+
+  // Single format part assignment
   async getFormatAssignment(formatPart: string) {
     return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`);
   }
+
+  // Assign / unassign RFID tag to format part
   async assignRFIDToFormatPart(formatPart: string, rfidTagId: string) {
     return this.request('/api/format-assignments', {
       method: 'POST',
       body: JSON.stringify({ format_part: formatPart, rfid_tag_id: rfidTagId })
     });
   }
+  
+  // Unassign RFID tag from format part
   async unassignRFIDFromFormatPart(formatPart: string) {
     return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`, { method: 'DELETE' });
   }
-
-  // Live current tag IDs (recently seen)
-  async getCurrentRFIDTagIds() {
-    return this.request('/api/current-rfid-tag-ids');
-  }
+  
+  // Live event IDs
   async getLiveEventIds() {
     return this.request('/api/live-event-ids');
   }
@@ -211,16 +204,19 @@ class APIClient {
     return this.request('/api/opc-ua/status');
   }
 
+  // Get current OPC UA value
   async getOPCUAValue(): Promise<OPCUAValueResponse> {
     return this.request('/api/opc-ua/value');
   }
 
+  // Refresh OPC UA value
   async refreshOPCUAValue(): Promise<OPCUAValueResponse> {
     return this.request('/api/opc-ua/refresh', {
       method: 'POST',
     });
   }
 
+  // Reconnect OPC UA
   async reconnectOPCUA(): Promise<{ success: boolean, message: string, status: string }> {
     return this.request('/api/opc-ua/reconnect', {
       method: 'POST',

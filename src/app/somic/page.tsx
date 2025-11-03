@@ -13,12 +13,6 @@ type Config = {
   OPC_UA_EVENT_INTERVAL_MS: number;
   OPC_UA_EVENT_MAX_EVENTS: number;
   OPC_UA_ENABLED: boolean;
-  RFID_INVENTORY_ENABLED: boolean;
-  RFID_READER_IP: string;
-  RFID_READER_PORT: number;
-  RFID_READER_ANT: string;
-  RFID_CURRENT_RETENTION_SEC: number;
-  RFID_INVENTORY_INTERVAL_SEC: number;
   THEME_COLOR?: string;
 };
 
@@ -31,35 +25,28 @@ const defaultConfig: Config = {
   OPC_UA_EVENT_INTERVAL_MS: 500,
   OPC_UA_EVENT_MAX_EVENTS: 500,
   OPC_UA_ENABLED: false,
-  RFID_INVENTORY_ENABLED: false,
-  RFID_READER_IP: "",
-  RFID_READER_PORT: 2111,
-  RFID_READER_ANT: "F",
-  RFID_CURRENT_RETENTION_SEC: 10,
-  RFID_INVENTORY_INTERVAL_SEC: 1,
-  THEME_COLOR: "#1976d2", // Default color
+  THEME_COLOR: "#1976d2",
 };
 
 
+// Determine backend URL based on environment and window location
 const backendUrl = ((): string => {
   const envUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (envUrl && envUrl.trim()) return envUrl;
 
   if (typeof window !== 'undefined') {
     try {
-      // Prefer the full origin (protocol + host [+ port]) which matches how nginx will proxy
       const origin = window.location.origin;
       if (origin && origin.trim()) return origin;
     } catch {
-      // ignore
     }
   }
 
-  // Fallback to explicit env port or localhost with default backend port
   const p = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
   return `http://localhost:${p}`;
 })();
 
+// Main component
 export default function SomicPage() {
   const { t, lang } = useI18n();
   const [password, setPassword] = useState("");
@@ -67,7 +54,6 @@ export default function SomicPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState<Config>(defaultConfig);
-  // Remove separate color state, use config.THEME_COLOR only
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
@@ -91,12 +77,6 @@ export default function SomicPage() {
           OPC_UA_EVENT_INTERVAL_MS: Number(data.OPC_UA_EVENT_INTERVAL_MS ?? 500),
           OPC_UA_EVENT_MAX_EVENTS: Number(data.OPC_UA_EVENT_MAX_EVENTS ?? 500),
           OPC_UA_ENABLED: !!data.OPC_UA_ENABLED,
-          RFID_INVENTORY_ENABLED: !!data.RFID_INVENTORY_ENABLED,
-          RFID_READER_IP: data.RFID_READER_IP || "",
-          RFID_READER_PORT: data.RFID_READER_PORT ?? 2111,
-          RFID_READER_ANT: data.RFID_READER_ANT || "F",
-          RFID_CURRENT_RETENTION_SEC: data.RFID_CURRENT_RETENTION_SEC ?? 10,
-          RFID_INVENTORY_INTERVAL_SEC: data.RFID_INVENTORY_INTERVAL_SEC ?? 1,
           THEME_COLOR: data.THEME_COLOR || "#1976d2",
         });
         setLoading(false);
@@ -104,7 +84,6 @@ export default function SomicPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Keep iframe language in sync when user toggles DE/EN without reload
   useEffect(() => {
     try {
       type IframeWin = Window & { setLanguage?: (l: string) => void };
@@ -115,10 +94,10 @@ export default function SomicPage() {
         iframeRef.current.contentWindow.postMessage({ type: 'set-language', lang }, '*');
       }
     } catch {
-      // ignore cross-origin or timing issues
     }
   }, [lang]);
 
+  // Handle password submission
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -135,7 +114,6 @@ export default function SomicPage() {
     } catch (err) {
       console.error("Password verification failed:", err);
       setError(t("server_connection_failed_fallback"));
-      // Fallback to original logic if backend is not available
       if (password === "a") {
         setUnlocked(true);
         setError("");
@@ -147,6 +125,7 @@ export default function SomicPage() {
     }
   }
 
+  // Handle configuration changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked !== undefined ? (e.target as HTMLInputElement).checked : undefined;
@@ -158,10 +137,10 @@ export default function SomicPage() {
     }));
   };
 
+  // Handle saving configuration
   const handleSave = async () => {
     setSaving(true);
     setSaveMsg("");
-    // Read color directly from the input as a last-resort source of truth
     const selectedColor = colorInputRef.current?.value ?? config.THEME_COLOR ?? "#1976d2";
     const payload = { ...config, THEME_COLOR: selectedColor };
     console.debug("Saving config payload:", payload);
@@ -174,12 +153,10 @@ export default function SomicPage() {
       if (res.ok) {
         setSaveMsg(t("config_saved"));
         try {
-          // Notify other open tabs/pages about the updated color so they can refresh UI
           const bc = new BroadcastChannel('somic-config-updates');
           bc.postMessage({ THEME_COLOR: payload.THEME_COLOR });
           bc.close();
         } catch {
-          // BroadcastChannel not available in all environments; ignore
         }
       } else {
         setSaveMsg(t("config_failed"));
@@ -190,6 +167,7 @@ export default function SomicPage() {
     setSaving(false);
   };
 
+  // Render component
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-black" style={{ height: "100vh" }}>
       <Header profile="Somic" />
@@ -238,7 +216,7 @@ export default function SomicPage() {
                   const win = iframeRef.current?.contentWindow as IframeWin | null;
                   if (!win) return;
                   let attempts = 0;
-                  const maxAttempts = 50; // ~10s @ 200ms
+                  const maxAttempts = 50;
                   const interval = setInterval(() => {
                     attempts++;
                     try {
@@ -255,7 +233,6 @@ export default function SomicPage() {
                         }
                       } else if (attempts >= maxAttempts) {
                         clearInterval(interval);
-                        // Last-chance: if function exists, call it once even if selects not found yet
                         if (hasFn && !win.__rfidAutoReadDone) {
                           win.__rfidAutoReadDone = true;
                           win.readRFIDTags?.();
@@ -266,7 +243,6 @@ export default function SomicPage() {
                       console.error('RFID auto-read polling failed:', err);
                     }
                   }, 200);
-                  // Try to set language immediately after load as well
                   try { win.setLanguage?.(lang); } catch {}
                 } catch (e) {
                   console.error("Failed to setup auto-run for readRFIDTags:", e);
@@ -313,7 +289,6 @@ export default function SomicPage() {
                         } else {
                           setUploadMsg(t("html_upload_error"));
                         }
-                        // Reset input, damit gleiche Datei erneut hochgeladen werden kann
                         e.target.value = "";
                       }
                     }}
@@ -372,20 +347,6 @@ export default function SomicPage() {
                       </label>
                     </div>
                     <hr className="my-2" />
-                    {/*}
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        name="RFID_INVENTORY_ENABLED"
-                        checked={config.RFID_INVENTORY_ENABLED}
-                        onChange={handleChange}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label className="ml-2 block text-sm text-black">
-                        Enable Direct RFID Inventory
-                      </label>
-                    </div>
-                    */}
                     <div className="mt-4">
                       <button
                         type="button"
@@ -438,45 +399,6 @@ export default function SomicPage() {
                         </div>
                       )}
                     </div>
-                    {/*
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => setOpenSection(openSection === 'directrfid' ? null : 'directrfid')}
-                        className="w-full flex justify-between items-center px-3 py-2 bg-gray-100 rounded hover:bg-gray-200 text-black"
-                      >
-                        <span>Direct RFID Inventory Settings</span>
-                        <span>{openSection === 'directrfid' ? '−' : '+'}</span>
-                      </button>
-                      {openSection === 'directrfid' && (
-                        <div className="mt-2 space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-black">RFID Reader IP</label>
-                            <input type="text" name="RFID_READER_IP" value={config.RFID_READER_IP} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-black">RFID Reader Port</label>
-                            <select name="RFID_READER_PORT" value={config.RFID_READER_PORT} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black">
-                              <option value={2111}>2111 (CoLa-A ASCII)</option>
-                              <option value={2112}>2112 (CoLa-B Binary)</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-black">RFID Reader Ant Mask</label>
-                            <input type="text" name="RFID_READER_ANT" value={config.RFID_READER_ANT} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-black">Current RFID Retention (s)</label>
-                            <input type="number" name="RFID_CURRENT_RETENTION_SEC" value={config.RFID_CURRENT_RETENTION_SEC} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-black">Inventory Interval (s)</label>
-                            <input type="number" name="RFID_INVENTORY_INTERVAL_SEC" value={config.RFID_INVENTORY_INTERVAL_SEC} onChange={handleChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-black" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    */}
                     <div>
                       <button
                         type="submit"

@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
 
+// API route to fetch OPC UA value from the backend
 export async function GET() {
   try {
-    // Backend OPC UA Value-Endpoint direkt aufrufen
     const response = await fetch(`${BACKEND_URL}/api/opc-ua/value`, {
       method: "GET",
       headers: {

@@ -74,7 +74,6 @@ input[type="checkbox"] {
   accent-color: #0078D4;
 }
 
-/* Controls Styles */
 .controls {
   margin-bottom: 15px;
   display: flex;
@@ -96,7 +95,6 @@ input[type="checkbox"] {
   background: #0056b3;
 }
 
-/* Refresh button styling */
 .controls button[onclick*="refreshFormatParts"] {
   background: #28a745;
 }
@@ -105,7 +103,6 @@ input[type="checkbox"] {
   background: #1e7e34;
 }
 
-/* No Parts Message */
 .no-parts {
   text-align: center;
   color: #6c757d;
@@ -116,7 +113,6 @@ input[type="checkbox"] {
   margin: 10px 0;
 }
 
-/* Enhanced Part Entry Styles */
 .part-entry label {
   min-width: 80px;
   font-weight: bold;
@@ -144,7 +140,6 @@ input[type="checkbox"] {
   background: #138496;
 }
 
-/* Style pictures */
 #preview {
   position: fixed;
   top: 50%;
@@ -164,7 +159,6 @@ input[type="checkbox"] {
   opacity: 1;
 }
 
-/* Upload Modal */
 #upload-modal {
   position: fixed;
   inset: 0;

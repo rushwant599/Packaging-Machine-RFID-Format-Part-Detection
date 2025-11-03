@@ -16,10 +16,16 @@ const translations = {
   }
 };
 
+// Function to set language on the page
 function setLanguage(lang) {
   const t = translations[lang] || translations.en;
   const byId = (id) => document.getElementById(id);
-  const setText = (id, value) => { const el = byId(id); if (el) el.textContent = value; };
+  const setText = (id, value) => {
+    const el = byId(id);
+    if (el) {
+      el.textContent = value;
+    }
+  };
   setText('assigned-parts-title', t.assignedParts);
   setText('final-check-label', t.allPartsAssigned);
   setText('all-format-parts-title', t.allFormatParts);
@@ -33,15 +39,14 @@ function setLanguage(lang) {
     const params = new URLSearchParams(window.location.search);
     const lang = (params.get('lang') || '').toLowerCase();
     if (lang === 'de' || lang === 'en') {
-      // wait for DOM content
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => setLanguage(lang));
       } else {
         setLanguage(lang);
       }
-      try { document.documentElement.lang = lang; } catch {}
+      try { document.documentElement.lang = lang; } catch { }
     }
-  } catch {}
+  } catch { }
 })();
 
 // Listen to parent window messages to update language dynamically without reload
@@ -50,7 +55,7 @@ window.addEventListener('message', (ev) => {
     const data = ev.data || {};
     if (data && data.type === 'set-language' && (data.lang === 'de' || data.lang === 'en')) {
       setLanguage(data.lang);
-      try { document.documentElement.lang = data.lang; } catch {}
+      try { document.documentElement.lang = data.lang; } catch { }
     }
-  } catch {}
+  } catch { }
 });

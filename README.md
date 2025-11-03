@@ -135,9 +135,13 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
 
 - Ausgabeformat (RFID Tag Data):
 
+-> Parameter -> Datenverarbeitung -> Ausgabeformat
+
 ![Ausgabeformat](graphs/image1.png)
 
 - OPC UA Settings:
+
+-> Parameter -> Netzwerk -> Ethernet -> OPC UA
 
 ![OpcUA Settings](graphs/image2.png)
 
@@ -145,7 +149,15 @@ Don't forget to turn on the OPC UA server in your RFID reader!
 
 - Objekttrigger (Object Trigger) settings:
 
+-> Parameter -> Lesekonfiguration -> Objekttriggersteuerung
+
 ![Objekttrigger](graphs/image3.png)
+
+- Antenna Sounds:
+
+-> Parameter -> Netzwerk -> Digitale Ausgänge
+
+![Antenna Sounds](graphs/image4.png)
 
 - Export PDF:
 

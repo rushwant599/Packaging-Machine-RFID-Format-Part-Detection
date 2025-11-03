@@ -1,20 +1,3 @@
-"""HTML Main Table Row Extractor
-
-Provides a small utility to read the cached customer HTML file and
-extract every <tr> element contained in the <table class="main"> while
-preserving the original order.
-
-Returned rows can be provided either as raw HTML strings (default) or as
-simple text representations.
-
-Usage:
-    extractor = MainTableRowExtractor(path_to_html)
-    rows = extractor.extract_rows(as_html=True)
-
-The implementation is intentionally light‑weight and stateless; call it
-on demand so the endpoint always reflects the latest uploaded file.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,28 +5,17 @@ from typing import List, Dict, Any
 from bs4 import BeautifulSoup
 
 
+# Main Table Row Extractor
 class MainTableRowExtractor:
-    """Extract all <tr> blocks from <table class="main"> in order.
 
-    Parameters
-    ----------
-    html_file_path: str | Path
-        Path to the cached HTML file.
-    """
-
+    # Initialization
     def __init__(self, html_file_path: str | Path):
         self.html_file_path = Path(html_file_path)
-        # Prefer the original (uninjected) cache if the typical injected filename is provided
         self._preferred_path = self._resolve_preferred_path(self.html_file_path)
 
+    # Internal helper to resolve preferred path
     def _resolve_preferred_path(self, path: Path) -> Path:
-        """If the given path points to the injected cache, use the original sibling when available.
-
-        This keeps existing callers backward compatible while ensuring data extraction works on
-        the raw, non-injected HTML. If no original exists, fall back to the provided path.
-        """
         try:
-            # Common filenames in this project
             injected_names = {
                 "customer-html-cache.html",
                 "customer-html-cache.injected.html",
@@ -53,34 +25,21 @@ class MainTableRowExtractor:
                 if original.exists():
                     return original
         except Exception:
-            # On any issue, just use the provided path
             pass
         return path
 
-    # Public API -----------------------------------------------------
+    # Public API 
     def extract_rows(self, *, as_html: bool = True, strip_whitespace: bool = False,
-                     with_meta: bool = False, duplicate_caption: bool = False) -> List[Any]:  # duplicate_caption kept for backward compatibility
-        """Return all table row blocks preserving order.
-
-        Parameters
-        ----------
-        as_html: bool
-            When True (default) return the full HTML of each <tr> including
-            its attributes and children. When False return a plain text
-            concatenation (cells separated by a single space).
-        strip_whitespace: bool
-            If True and as_html=True, leading/trailing whitespace around the
-            serialized row string is stripped.
-        """
+                     with_meta: bool = False, duplicate_caption: bool = False) -> List[Any]:
         soup = self._load_soup()
         table = soup.find("table", class_="main")
         if not table:
             return []
         rows = table.find_all("tr")
 
-        # Pre-collect caption only rows (class 'caption' but NOT 'line') for optional duplication (legacy behavior)
         caption_only_rows = [r for r in rows if 'caption' in (r.get('class') or []) and 'line' not in (r.get('class') or [])]
 
+        # Serializer function
         def serialize_tr(row) -> Dict[str, Any]:
             classes = row.get('class') or []
             is_caption = 'caption' in classes
@@ -127,7 +86,7 @@ class MainTableRowExtractor:
                     result.append(serialize_tr(cap))
         return result
 
-    # Internal helpers -----------------------------------------------
+    # Internal helpers 
     def _load_soup(self) -> BeautifulSoup:
         path = getattr(self, "_preferred_path", self.html_file_path)
         if not path.exists():

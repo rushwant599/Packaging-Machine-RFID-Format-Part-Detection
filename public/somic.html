@@ -1,35 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
+
+<!-- Head Section -->
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Customer RFID Portal</title>
   <link rel="stylesheet" href="somic.css" />
   <script defer src="features.js"></script>
   <script defer src="translations.js"></script>
 </head>
-<body>
- 
 
+<!-- Body Section -->
+<body>
   <main class="main-layout">
-     <img id="preview" style="max-width:1000px; display:none">
+    <img id="preview" style="max-width:1000px; display:none">
     <section class="format-window">
-      <h2>Assigned Parts</h2>
+      <h2 id="assigned-parts-title">Assigned Parts</h2>
       <div id="assigned-parts-list" class="parts-list"></div>
       <div class="final-check">
-        <label><input type="checkbox" id="final-check" disabled> All parts assigned</label>
+        <label><input type="checkbox" id="final-check" disabled> <span id="final-check-label">All parts assigned</span></label>
       </div>
     </section>
 
     <!-- Right Side: All Formats -->
     <section class="all-formats-window">
-      <h2>All Format Parts</h2>
+      <h2 id="all-format-parts-title">All Format Parts</h2>
       <div class="controls">
-        <button onclick="readRFIDTags()">Read RFID Tags</button>
-        <button onclick="refreshFormatParts()">🔄 Refresh Parts</button>
+        <button id="btn-read-tags" onclick="readRFIDTags()">Read RFID Tags</button>
+        <button id="btn-refresh-parts" onclick="refreshFormatParts()">🔄 Refresh Parts</button>
       </div>
       <div id="format-parts-list" class="parts-list"></div>
     </section>
   </main>
 </body>
-</html>
+
+</html>      } catch (error) {
+        console.error('Error in inline script:', error);
+      }

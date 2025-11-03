@@ -40,7 +40,7 @@ jobs:
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
       # Fall A: Expliziter Tag per Input (workflow_call oder workflow_dispatch)
       - name: Build and push Docker image (explicit tag)
@@ -49,7 +49,7 @@ jobs:
         with:
           context: .
           file: ./dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ghcr.io/${{ steps.namespace.outputs.output }}:${{ inputs.tag }}
           cache-from: type=gha
@@ -73,7 +73,7 @@ jobs:
         with:
           context: .
           file: ./dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

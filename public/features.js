@@ -1,82 +1,74 @@
 let rfidTags = [];
-let formatParts = []; // Dynamic format parts from API
-let assignments = {}; // Format part -> RFID tag assignments from database
+let formatParts = [];
+let assignments = {};
 
-// API configuration: prefer same-origin under HTTPS/nginx, else dev fallback to :8001
+// Determine API base URL dynamically
 const API_BASE_URL = (() => {
   try {
-    const { protocol, host } = window.location; // host includes port when present
-    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-    if (protocol === 'https:' || isStandard) {
-      return `${protocol}//${host}`; // nginx reverse proxy - host preserves port like :4400
+    if (typeof window !== 'undefined') {
+      const origin = window.location.origin;
+      if (origin && origin.trim()) return origin;
     }
-    // dev: frontend likely on :3000 and backend on :8001 -> use hostname part and backend port
-    const hostnameOnly = host.split(':')[0];
-    return `${protocol}//${hostnameOnly}:8001`;
   } catch (e) {
-    return 'http://localhost:8001';
   }
+  return 'http://localhost:8001';
 })();
 
-// Mirror backend _sanitize_part: replace any non [A-Za-z0-9_\-] with '_'
+// Sanitize format part ID for safe usage in URLs and filenames
 function sanitizeFormatPartId(id) {
   if (id == null) return '';
   return String(id).trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
 }
 
+// Check if hostname is localhost or equivalent
 function isLocalhostHost(hostname) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
 }
 
+// Check if the current context is secure for camera access
 function isSecureForCamera() {
-  // getUserMedia requires a secure context (HTTPS) except on localhost
   try {
     if (typeof window !== 'undefined') {
-  const { protocol, hostname } = window.location;
+      const { protocol, hostname } = window.location;
       if (window.isSecureContext) return true;
       if (protocol === 'https:') return true;
       if (isLocalhostHost(hostname)) return true;
-      // Also allow when served via http but behind a reverse proxy that terminates TLS and forwards as http with private IP
-      // In such cases, browsers still block camera on http, so return false to show guidance.
     }
-  } catch {}
+  } catch { }
   return false;
 }
 
+// Load format parts from API
 async function loadFormatParts() {
   try {
     console.log('Loading format parts from API...');
     const response = await fetch(`${API_BASE_URL}/api/format-parts`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     const data = await response.json();
     console.log('Format parts loaded:', data);
-    
+
     if (data.formatParts && Array.isArray(data.formatParts)) {
       formatParts = data.formatParts.map(part => ({ id: part }));
       console.log(`Loaded ${formatParts.length} format parts:`, formatParts);
       updatePartsDisplay();
     } else {
       console.warn('No format parts found in API response');
-      // Fallback to empty array
       formatParts = [];
       updatePartsDisplay();
     }
   } catch (error) {
     console.error('Error loading format parts:', error);
-    // Fallback to static data if API fails
-    formatParts = [
-      { id: '1A1' }, { id: '2A1' }, { id: '3A2' },
-      { id: '2B1' }, { id: '3C2' }, { id: '4D3' },
-    ];
-    console.log('Using fallback format parts');
+    formatParts = [];
+    console.warn('Keine Formatteile verfügbar (API-Fehler).');
     updatePartsDisplay();
   }
 }
 
+// Load RFID tags from backend
 async function readRFIDTags() {
   try {
     console.log('Loading RFID tags from backend...');
@@ -93,16 +85,15 @@ async function readRFIDTags() {
   } catch (e) {
     console.error('Error loading RFID tags', e);
   }
-  // Fallback: keep existing rfidTags (no static demo values anymore)
   if (!rfidTags.length) {
-    rfidTags = [""]; // only unassigned option
+    rfidTags = [""];
   }
   updateDropdowns();
 }
 
+// Update all dropdowns based on current assignments and available tags
 function updateDropdowns() {
   const partRows = document.querySelectorAll('.rfid-select');
-  // Build reverse map: tagId -> formatPart it's assigned to
   const assignedByTag = {};
   Object.keys(assignments || {}).forEach(part => {
     const tag = assignments[part];
@@ -114,27 +105,22 @@ function updateDropdowns() {
     const partId = select.id.replace('select-', '');
     const currentAssigned = assignments[partId] || "";
 
-    // Clear existing
     select.innerHTML = '';
 
-    // 1) Always add unassigned first
     const optEmpty = document.createElement('option');
     optEmpty.value = "";
     optEmpty.textContent = "(unassigned)";
     select.appendChild(optEmpty);
 
-    // 2) If this part already has a tag, add it next (enabled).
     if (currentAssigned) {
       const optCurr = document.createElement('option');
       optCurr.value = currentAssigned;
       optCurr.textContent = `${currentAssigned} (assigned)`;
-      // Green highlight for assigned
       optCurr.style.backgroundColor = '#d4edda';
       optCurr.style.color = '#155724';
       select.appendChild(optCurr);
     }
 
-    // 3) Add all available tags (not assigned anywhere)
     const available = rfidTags.filter(t => t && t !== currentAssigned && !assignedByTag[t]);
     available.forEach(tag => {
       const opt = document.createElement('option');
@@ -143,7 +129,6 @@ function updateDropdowns() {
       select.appendChild(opt);
     });
 
-    // 4) Add all tags assigned to other parts at the end, disabled + green
     const usedElsewhere = rfidTags.filter(t => t && t !== currentAssigned && assignedByTag[t]);
     usedElsewhere.forEach(tag => {
       const opt = document.createElement('option');
@@ -155,11 +140,9 @@ function updateDropdowns() {
       select.appendChild(opt);
     });
 
-    // Restore selection priority: 1) current assignment 2) previous if still enabled 3) empty
     if (currentAssigned) {
       select.value = currentAssigned;
     } else if (prevValue) {
-      // Find matching option and ensure it's not disabled
       let canSelectPrev = false;
       for (const opt of select.options) {
         if (opt.value === prevValue && !opt.disabled) {
@@ -174,34 +157,33 @@ function updateDropdowns() {
   });
 }
 
+// Assign RFID tag to format part
 async function assignRFID(partId) {
   const select = document.getElementById('select-' + partId);
   const value = select.value;
   const checkbox = document.getElementById('check-' + partId);
-  
-  // Save to database
+
   const success = await saveAssignment(partId, value);
-  
+
   if (success) {
     checkbox.checked = value !== "";
     checkAllAssigned();
-    // Refresh dropdowns to reflect disabled/green states and prevent selecting used tags
     updateDropdowns();
   } else {
-    // Revert on error
     alert('Fehler beim Speichern der Zuordnung');
     select.value = assignments[partId] || "";
   }
 }
 
+// Check if all format parts are assigned
 function checkAllAssigned() {
   const checkboxes = document.querySelectorAll('.assign-check');
   const allChecked = [...checkboxes].every(cb => cb.checked);
   document.getElementById('final-check').checked = allChecked;
 }
 
+// Update assignment display (checkboxes)
 function updateAssignmentDisplay() {
-  // Update checkboxes based on assignments
   formatParts.forEach(p => {
     const checkbox = document.getElementById('check-' + p.id);
     if (checkbox) {
@@ -211,16 +193,16 @@ function updateAssignmentDisplay() {
   checkAllAssigned();
 }
 
+// Update the display of format parts and their assignment controls
 function updatePartsDisplay() {
   const allList = document.getElementById('format-parts-list');
   const assignedList = document.getElementById('assigned-parts-list');
-  
+
   if (!allList || !assignedList) {
     console.error('Required DOM elements not found');
     return;
   }
-  
-  // Clear existing content
+
   allList.innerHTML = '';
   assignedList.innerHTML = '';
   if (formatParts.length === 0) {
@@ -228,9 +210,8 @@ function updatePartsDisplay() {
     assignedList.innerHTML = '<div class="no-parts">No parts to assign.</div>';
     return;
   }
-  
+
   formatParts.forEach(p => {
-    // Right side - All Parts
     const row = document.createElement('div');
     row.className = 'part-entry';
     row.innerHTML = `
@@ -240,7 +221,6 @@ function updatePartsDisplay() {
     `;
     allList.appendChild(row);
 
-    // Left side - Assigned Parts
     const assigned = document.createElement('div');
     assigned.className = 'part-entry';
     assigned.innerHTML = `
@@ -251,16 +231,14 @@ function updatePartsDisplay() {
     `;
     assignedList.appendChild(assigned);
   });
-  
-  // Update dropdowns with RFID tags
+
   updateDropdowns();
-  
-  // Update assignment display
   updateAssignmentDisplay();
-  
+
   console.log(`Updated display with ${formatParts.length} format parts`);
 }
 
+// Refresh format parts and assignments
 async function refreshFormatParts() {
   console.log('Refreshing format parts and assignments...');
   await loadFormatParts();
@@ -272,14 +250,14 @@ async function loadAssignments() {
   try {
     console.log('Loading assignments from database...');
     const response = await fetch(`${API_BASE_URL}/api/format-assignments`);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    
+
     const data = await response.json();
     console.log('Assignments loaded:', data);
-    
+
     if (data.success && data.assignments) {
       assignments = data.assignments;
       console.log(`Loaded ${Object.keys(assignments).length} assignments:`, assignments);
@@ -303,13 +281,12 @@ async function loadAssignments() {
 async function saveAssignment(formatPart, rfidTagId) {
   try {
     console.log(`Saving assignment: ${formatPart} -> ${rfidTagId}`);
-    
+
     if (!rfidTagId || rfidTagId === "") {
-      // Unassign RFID from format part
       const response = await fetch(`${API_BASE_URL}/api/format-assignments/${formatPart}`, {
         method: 'DELETE'
       });
-      
+
       if (response.ok) {
         delete assignments[formatPart];
         console.log(`Unassigned RFID from ${formatPart}`);
@@ -319,7 +296,6 @@ async function saveAssignment(formatPart, rfidTagId) {
         return false;
       }
     } else {
-      // Assign RFID to format part
       const response = await fetch(`${API_BASE_URL}/api/format-assignments`, {
         method: 'POST',
         headers: {
@@ -330,7 +306,7 @@ async function saveAssignment(formatPart, rfidTagId) {
           rfid_tag_id: rfidTagId
         })
       });
-      
+
       if (response.ok) {
         assignments[formatPart] = rfidTagId;
         console.log(`Assigned ${rfidTagId} to ${formatPart}`);
@@ -359,10 +335,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowRight") showNext();
 });
 
+// Show picture(s) for a given format part ID
 async function showPicture(id) {
   try {
-  const safeId = sanitizeFormatPartId(id);
-  const resp = await fetch(`${API_BASE_URL}/api/pictures/by-part/${safeId}`);
+    const safeId = sanitizeFormatPartId(id);
+    const resp = await fetch(`${API_BASE_URL}/api/pictures/by-part/${safeId}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     let files = [];
@@ -415,12 +392,12 @@ function showNext() {
   showPictureFullScreen(`${API_BASE_URL}/pictures/${encodeURIComponent(matchedPictures[currentIndex])}`);
 }
 
-// Picture Upload (File or Camera)
 let uploadPartId = null;
 let mediaStream = null;
-let videoInputDevices = []; // list of video input deviceIds
+let videoInputDevices = [];
 let currentVideoDeviceIndex = -1;
 
+// Open upload modal for a given format part ID
 function openUpload(partId) {
   uploadPartId = partId;
   const modal = ensureUploadModal();
@@ -428,6 +405,7 @@ function openUpload(partId) {
   modal.querySelector('#upload-title').textContent = `Upload Bild für ${partId}`;
 }
 
+// Close upload modal
 function closeUpload() {
   const modal = document.getElementById('upload-modal');
   if (!modal) return;
@@ -436,6 +414,7 @@ function closeUpload() {
   uploadPartId = null;
 }
 
+// Ensure upload modal exists in DOM
 function ensureUploadModal() {
   let modal = document.getElementById('upload-modal');
   if (modal) return modal;
@@ -464,9 +443,7 @@ function ensureUploadModal() {
     <div id="upload-status" class="upload-status"></div>
   </div>`;
   document.body.appendChild(modal);
-  // File change handler
   modal.querySelector('#file-input').addEventListener('change', handleFileSelected);
-  // camera select change handler
   modal.querySelector('#camera-select').addEventListener('change', (e) => {
     const idx = parseInt(e.target.value, 10);
     if (!Number.isNaN(idx) && idx >= 0) {
@@ -476,11 +453,13 @@ function ensureUploadModal() {
   return modal;
 }
 
+// Trigger file input click
 function triggerFile() {
   const input = document.getElementById('file-input');
   if (input) input.click();
 }
 
+// Handle file selection for upload
 async function handleFileSelected(ev) {
   const file = ev.target.files[0];
   if (!file || !uploadPartId) return;
@@ -502,6 +481,7 @@ async function handleFileSelected(ev) {
   ev.target.value = '';
 }
 
+// Toggle camera on/off
 async function toggleCamera() {
   const video = document.getElementById('camera');
   if (!video) return;
@@ -510,7 +490,6 @@ async function toggleCamera() {
     stopCamera();
     return;
   }
-  // Security and API availability checks
   if (!isSecureForCamera()) {
     if (status) status.textContent = 'Kamera benötigt HTTPS oder localhost. Bitte App über https://<deine-ip>:3000 öffnen oder Datei-Upload verwenden.';
     return;
@@ -520,16 +499,12 @@ async function toggleCamera() {
     return;
   }
   try {
-    // Permission-first: request a minimal getUserMedia to prompt permission if needed,
-    // then enumerate devices and populate the select. This avoids empty labels/deviceIds.
     await populateCameraSelect();
 
-    // Start camera for current index (if set) or default to first device
     const startIndex = (currentVideoDeviceIndex >= 0) ? currentVideoDeviceIndex : (videoInputDevices.length > 0 ? 0 : -1);
     if (startIndex >= 0) {
       await startCameraForDevice(startIndex);
     } else {
-      // fallback to generic getUserMedia
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
       video.srcObject = mediaStream;
       video.style.display = 'block';
@@ -552,7 +527,6 @@ async function startCameraForDevice(index) {
   try {
     const device = videoInputDevices[index];
     const constraints = { video: { deviceId: { exact: device.deviceId } }, audio: false };
-    // Stop any existing stream
     if (mediaStream) stopCamera();
     mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
     currentVideoDeviceIndex = index;
@@ -563,7 +537,6 @@ async function startCameraForDevice(index) {
     const flipBtn = document.getElementById('flip-btn');
     if (flipBtn) flipBtn.style.display = (videoInputDevices && videoInputDevices.length > 1) ? 'inline-block' : 'none';
     if (status) status.textContent = '';
-    // Update camera-select to reflect selection
     const sel = document.getElementById('camera-select');
     if (sel) {
       sel.value = String(currentVideoDeviceIndex);
@@ -574,14 +547,13 @@ async function startCameraForDevice(index) {
   }
 }
 
-// Flip between available video input devices
+// Flip to the next available camera
 async function flipCamera() {
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     videoInputDevices = devices.filter(d => d.kind === 'videoinput');
     if (!videoInputDevices || videoInputDevices.length <= 1) return;
-    // Move to next index
     const next = (currentVideoDeviceIndex + 1) % videoInputDevices.length;
     await startCameraForDevice(next);
   } catch (e) {
@@ -589,28 +561,23 @@ async function flipCamera() {
   }
 }
 
-// Permission-first device enumeration and populate select
+// Populate camera selection dropdown
 async function populateCameraSelect() {
-  // If enumerateDevices is missing, nothing we can do
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return;
   try {
-    // If labels/deviceIds are not available yet, ask for permission with minimal constraints
     let needPermission = false;
     try {
       const devicesCheck = await navigator.mediaDevices.enumerateDevices();
-      // If device labels are empty (''), we probably need permission
       needPermission = devicesCheck.every(d => d.kind !== 'videoinput' || !d.label);
     } catch (e) {
       needPermission = true;
     }
 
     if (needPermission && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
-      // request a tiny stream to trigger permission prompt but stop immediately
       let tmpStream = null;
       try {
         tmpStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       } catch (e) {
-        // permission denied or other error; continue and try to enumerate (likely will have no labels)
       } finally {
         if (tmpStream) {
           tmpStream.getTracks().forEach(t => t.stop());
@@ -620,22 +587,19 @@ async function populateCameraSelect() {
 
     const devices = await navigator.mediaDevices.enumerateDevices();
     videoInputDevices = devices.filter(d => d.kind === 'videoinput');
-    // Build select options
     const sel = document.getElementById('camera-select');
     if (sel) {
       sel.innerHTML = '';
       videoInputDevices.forEach((d, i) => {
         const opt = document.createElement('option');
         opt.value = String(i);
-        opt.textContent = d.label || `Camera ${i+1}`;
+        opt.textContent = d.label || `Camera ${i + 1}`;
         sel.appendChild(opt);
       });
-      // default index
       currentVideoDeviceIndex = videoInputDevices.length > 0 ? 0 : -1;
       sel.value = currentVideoDeviceIndex >= 0 ? String(currentVideoDeviceIndex) : '';
       sel.style.display = (videoInputDevices.length > 1) ? 'inline-block' : 'none';
     }
-    // Show flip button if multiple
     const flipBtn = document.getElementById('flip-btn');
     if (flipBtn) flipBtn.style.display = (videoInputDevices && videoInputDevices.length > 1) ? 'inline-block' : 'none';
   } catch (e) {
@@ -643,6 +607,7 @@ async function populateCameraSelect() {
   }
 }
 
+// Stop the camera and clean up
 function stopCamera() {
   if (mediaStream) {
     mediaStream.getTracks().forEach(t => t.stop());
@@ -658,6 +623,7 @@ function stopCamera() {
   if (flipBtn) flipBtn.style.display = 'none';
 }
 
+// Take snapshot from camera and upload
 async function takeSnapshot() {
   if (!mediaStream || !uploadPartId) return;
   const video = document.getElementById('camera');
@@ -694,15 +660,10 @@ document.addEventListener('keydown', (e) => {
 // Initialize the application
 window.onload = async () => {
   console.log('Initializing RFID Parts Application...');
-  
-  // Load RFID tags
+
   readRFIDTags();
-  
-  // Load format parts from API
   await loadFormatParts();
-  
-  // Load assignments from database
   await loadAssignments();
-  
+
   console.log('Application initialized successfully');
 };

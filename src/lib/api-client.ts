@@ -1,29 +1,18 @@
-// API client for Python backend
-// Problem bisher: Bei Zugriff von einem anderen Gerät im LAN zeigt 'localhost:8001' auf das dortige Gerät statt auf den Server.
-// Lösung: Falls NEXT_PUBLIC_BACKEND_URL nicht gesetzt ist, dynamisch die Host-IP/Domain des Frontends nutzen.
-// Optionaler Port override via NEXT_PUBLIC_BACKEND_PORT.
 let resolvedBase = process.env.NEXT_PUBLIC_BACKEND_URL;
 const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8001';
-// Prefer explicit NEXT_PUBLIC_BACKEND_URL when provided (for CI/docker overrides).
-// Otherwise on the client build the base using window.location.host which includes the port when present
+
 if (!resolvedBase && typeof window !== 'undefined') {
   try {
-    const { protocol, host } = window.location; // host == hostname[:port]
-    const isStandard = (protocol === 'https:' && (host.endsWith(':443') || !host.includes(':'))) || (protocol === 'http:' && (host.endsWith(':80') || !host.includes(':')));
-    // If running under https or a standard host, use the full host (preserves :port when mapped by Docker)
-    if (protocol === 'https:' || isStandard) {
-      resolvedBase = `${protocol}//${host}`;
-    } else {
-      // development: typical case where frontend is on :3000 and backend listens on separate port
-      resolvedBase = `${protocol}//${host.split(':')[0]}:${backendPort}`;
+    const origin = window.location.origin;
+    if (origin && origin.trim()) {
+      resolvedBase = origin;
     }
   } catch {
-    // ignore and fallback below
   }
 }
-// Fallback (Dev Einzelstart): localhost
-export const BACKEND_URL = resolvedBase || 'http://localhost:8001';
-// Optional: kurze Debug-Ausgabe einmalig
+
+export const BACKEND_URL = resolvedBase || `http://localhost:${backendPort}`;
+
 declare global {
   interface Window { __BACKEND_URL_LOGGED__?: boolean }
 }
@@ -94,7 +83,7 @@ class APIClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
-    
+
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
@@ -107,7 +96,7 @@ class APIClient {
       throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
-  return response.json() as Promise<T>;
+    return response.json() as Promise<T>;
   }
 
   // Health check
@@ -129,6 +118,7 @@ class APIClient {
     return response.text();
   }
 
+  // Upload customer HTML file
   async uploadCustomerHTML(file: File): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
@@ -149,16 +139,12 @@ class APIClient {
     });
   }
 
-  async getRFIDTags(): Promise<RFIDTag[]> {
-    return this.request<RFIDTag[]>('/api/rfid/tags');
-  }
-
   // Format data operations
   async getFormatData() {
     return this.request('/api/format-data');
   }
 
-  async getFormatParts(): Promise<{formatParts: string[], count: number, message: string}> {
+  async getFormatParts(): Promise<{ formatParts: string[], count: number, message: string }> {
     return this.request('/api/format-parts');
   }
 
@@ -175,10 +161,12 @@ class APIClient {
     return this.request(endpoint);
   }
 
+  // Formats
   async getFormats() {
     return this.request('/api/formats');
   }
 
+  // Format parts per format
   async getFormatPartsPerFormat() {
     return this.request('/api/format-parts-per-format');
   }
@@ -187,23 +175,26 @@ class APIClient {
   async getFormatAssignments() {
     return this.request('/api/format-assignments');
   }
+
+  // Single format part assignment
   async getFormatAssignment(formatPart: string) {
     return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`);
   }
+
+  // Assign / unassign RFID tag to format part
   async assignRFIDToFormatPart(formatPart: string, rfidTagId: string) {
     return this.request('/api/format-assignments', {
       method: 'POST',
       body: JSON.stringify({ format_part: formatPart, rfid_tag_id: rfidTagId })
     });
   }
+  
+  // Unassign RFID tag from format part
   async unassignRFIDFromFormatPart(formatPart: string) {
     return this.request(`/api/format-assignments/${encodeURIComponent(formatPart)}`, { method: 'DELETE' });
   }
-
-  // Live current tag IDs (recently seen)
-  async getCurrentRFIDTagIds() {
-    return this.request('/api/current-rfid-tag-ids');
-  }
+  
+  // Live event IDs
   async getLiveEventIds() {
     return this.request('/api/live-event-ids');
   }
@@ -213,17 +204,20 @@ class APIClient {
     return this.request('/api/opc-ua/status');
   }
 
+  // Get current OPC UA value
   async getOPCUAValue(): Promise<OPCUAValueResponse> {
     return this.request('/api/opc-ua/value');
   }
 
+  // Refresh OPC UA value
   async refreshOPCUAValue(): Promise<OPCUAValueResponse> {
     return this.request('/api/opc-ua/refresh', {
       method: 'POST',
     });
   }
 
-  async reconnectOPCUA(): Promise<{success: boolean, message: string, status: string}> {
+  // Reconnect OPC UA
+  async reconnectOPCUA(): Promise<{ success: boolean, message: string, status: string }> {
     return this.request('/api/opc-ua/reconnect', {
       method: 'POST',
     });

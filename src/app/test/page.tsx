@@ -11,6 +11,7 @@ type LiveEventIdsMessage = {
 type IntervalHandle = ReturnType<typeof setInterval>;
 type WebSocketWithPing = WebSocket & { __pingInterval?: IntervalHandle };
 
+// Type guard for snapshot validation
 function isLiveEventIdsSnapshot(v: unknown): v is { ids: string[]; count?: number; timestamp?: number } {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
@@ -20,6 +21,7 @@ function isLiveEventIdsSnapshot(v: unknown): v is { ids: string[]; count?: numbe
   return idsOk && countOk && tsOk;
 }
 
+// Main component
 export default function TestLiveEventIdsPage() {
   const [ids, setIds] = useState<string[]>([]);
   const [count, setCount] = useState<number | undefined>(undefined);
@@ -31,7 +33,6 @@ export default function TestLiveEventIdsPage() {
   const closedByUserRef = useRef<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
 
-  // Update current time every second to refresh "new" highlighting
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(interval);
@@ -39,7 +40,6 @@ export default function TestLiveEventIdsPage() {
 
   const [wsUrl, setWsUrl] = useState<string>("");
   useEffect(() => {
-    // Compute on client after mount to avoid SSR hydration mismatch
     try {
       const env = process.env.NEXT_PUBLIC_BACKEND_URL;
       if (env && env.trim()) {
@@ -48,20 +48,10 @@ export default function TestLiveEventIdsPage() {
         setWsUrl(`${wsProto}//${u.host}/ws/opc-ua`);
         return;
       }
-      const { protocol, host } = window.location; // host includes port when present
-      const isHttps = protocol === "https:";
-      const isStandard = (isHttps && (host.endsWith(':443') || !host.includes(':'))) || (!isHttps && (host.endsWith(':80') || !host.includes(':')));
-      let targetHost: string;
-      if (isHttps || isStandard) {
-        targetHost = host; // use host including mapped port like :4400
-      } else {
-        // dev scenario: frontend likely on :3000 -> target backend on :8001
-        targetHost = `${host.split(':')[0]}:8001`;
-      }
-      const wsProto = isHttps ? "wss:" : "ws:";
-      setWsUrl(`${wsProto}//${targetHost}/ws/opc-ua`);
+      const { protocol, host } = window.location;
+      const wsProto = protocol === "https:" ? "wss:" : "ws:";
+      setWsUrl(`${wsProto}//${host}/ws/opc-ua`);
     } catch {
-      // ignore
     }
   }, []);
 
@@ -72,7 +62,6 @@ export default function TestLiveEventIdsPage() {
         try { sock.send("ping"); } catch { /* noop */ }
       }, 25000);
     } catch {
-      // ignore
     }
   };
 
@@ -90,7 +79,7 @@ export default function TestLiveEventIdsPage() {
 
       ws.onmessage = (ev) => {
         try {
-          if (typeof ev.data !== "string") return; // only handle text frames
+          if (typeof ev.data !== "string") return;
           const data = JSON.parse(ev.data) as unknown;
           if (
             typeof data === "object" &&
@@ -109,7 +98,6 @@ export default function TestLiveEventIdsPage() {
                     newMap.set(id, now);
                   }
                 });
-                // Clean up timestamps for IDs no longer present
                 const currentIds = new Set(msg.ids);
                 Array.from(newMap.keys()).forEach(id => {
                   if (!currentIds.has(id)) {
@@ -123,7 +111,6 @@ export default function TestLiveEventIdsPage() {
             if (typeof msg.timestamp === "number") setTimestamp(msg.timestamp);
           }
         } catch {
-          // ignore malformed messages
         }
       };
 
@@ -138,7 +125,6 @@ export default function TestLiveEventIdsPage() {
           ws.__pingInterval = undefined;
         }
         if (!closedByUserRef.current) {
-          // simple reconnect after 2s
           reconnectTimerRef.current = setTimeout(() => connect(url), 2000);
         }
       };
@@ -168,7 +154,6 @@ export default function TestLiveEventIdsPage() {
     };
   }, [wsUrl]);
 
-  // Initial HTTP snapshot so data is shown even before first WS broadcast
   useEffect(() => {
     if (!wsUrl) return;
     try {
@@ -195,9 +180,8 @@ export default function TestLiveEventIdsPage() {
             if (typeof j.timestamp === "number") setTimestamp(j.timestamp);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     } catch {
-      // ignore
     }
   }, [wsUrl]);
 
@@ -207,10 +191,10 @@ export default function TestLiveEventIdsPage() {
       <div style={{ marginBottom: 12, display: "flex", gap: 12, alignItems: "center" }}>
         <span style={{ fontSize: 14 }}>Status:</span>
         {(() => {
-          let color = "#ca8a04"; // yellow-600 default (connecting)
-          if (status === "open") color = "#16a34a"; // green-600
-          else if (status === "error") color = "#dc2626"; // red-600
-          else if (status === "closed") color = "#6b7280"; // gray-500
+          let color = "#ca8a04";
+          if (status === "open") color = "#16a34a";
+          else if (status === "error") color = "#dc2626";
+          else if (status === "closed") color = "#6b7280";
           return (
             <span style={{ fontSize: 14, color }}>
               {status}
@@ -231,18 +215,16 @@ export default function TestLiveEventIdsPage() {
         <ul style={{ paddingLeft: 20 }}>
           {[...ids].sort((a, b) => a.localeCompare(b)).map((id) => {
             const idAge = idTimestamps.get(id);
-            const isRecent = idAge && (currentTime - idAge) < 5000; // 5 seconds
+            const isRecent = idAge && (currentTime - idAge) < 5000;
             return (
-              <li 
-                key={id} 
-                style={{ 
-                  fontFamily: "monospace", 
-                  fontSize: 14, 
+              <li
+                key={id}
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 14,
                   wordBreak: "break-all",
                   backgroundColor: isRecent ? "#22c55e20" : "transparent",
                   padding: "0px 1px",
-                  //borderRadius: "3px",
-                  //border: isRecent ? "1px solid #22c55e" : "1px solid transparent",
                   marginBottom: "2px"
                 }}
               >

@@ -147,6 +147,10 @@ Don't forget to turn on the OPC UA server in your RFID reader!
 
 ![Objekttrigger](graphs/image3.png)
 
+- Antenna Sounds:
+
+![Antenna Sounds](graphs/image4.png)
+
 - Export PDF:
 
 [Export PDF](graphs/RFU630E.pdf)

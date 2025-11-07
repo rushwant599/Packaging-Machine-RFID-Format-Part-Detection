@@ -69,7 +69,8 @@ A web portal for visualizing and managing RFID-tagged machine format parts. Tech
    ```
    or enable HTTPS via bundled Nginx reverse proxy on port 443:
    ```bash
-   docker run -d -p 443:443 --env-file .env.example -v $PWD/data:/app/data format-rfidparts
+   
+   docker run -d -p 443:443 -p 80:80 -v $PWD/data:/app/data format-rfidparts
    ```
    Certificates under `certs/` are copied into the image. Adjust `SERVER_IP` to match your host.
 3. **Or with Docker Compose (HTTPS on :443 + debug ports):**

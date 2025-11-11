@@ -100,7 +100,27 @@
       var ths = head ? head.querySelectorAll('th') : table.querySelectorAll('thead th');
       for (var i = 0; i < ths.length; i++) {
         var txt = (ths[i].textContent || '').toLowerCase().replace(/\./g, '').trim();
-        if (txt === 'ftl') return i;
+        if (txt === 'ftl' || txt === 'format' || txt === 'formatteil') return i;
+      }
+      var candidatesSet = new Set();
+      try {
+        if (currentFormat && formatMaps && formatMaps.byFormat && formatMaps.byFormat[currentFormat]) {
+          var fm = formatMaps.byFormat[currentFormat];
+          Object.keys(fm).forEach(function (k) { var v = fm[k]; if (v) candidatesSet.add((v || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim()); });
+        }
+      } catch (e) { }
+
+      if (candidatesSet.size) {
+        var rows = table.querySelectorAll('tr');
+        for (var r = 0; r < Math.min(rows.length, 30); r++) {
+          try {
+            var tds = rows[r].querySelectorAll('td');
+            for (var ci = 0; ci < tds.length; ci++) {
+              var cellText = (tds[ci].textContent || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+              if (cellText && candidatesSet.has(cellText)) return ci;
+            }
+          } catch (e) { }
+        }
       }
     } catch (e) { }
     return 3;
@@ -125,14 +145,22 @@
           var ftl = getFtlForNr(nr);
           if (!ftl) {
             var ftlIdx = findFTLIndex(table);
-            ftl = (tds[ftlIdx] && tds[ftlIdx].textContent) ? tds[ftlIdx].textContent.trim() : '';
+            if (typeof ftlIdx === 'number' && ftlIdx >= 0 && ftlIdx < tds.length) {
+              ftl = (tds[ftlIdx] && tds[ftlIdx].textContent) ? tds[ftlIdx].textContent : '';
+            } else {
+              ftl = '';
+            }
+            ftl = (ftl || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
           }
           var key = ftl ? (nr + ' ' + ftl) : nr;
           var target = tr.querySelector('td[data-format-key]');
           if (!target) {
             target = document.createElement('td');
             target.textContent = '–';
-            if (tds[2]) tds[2].parentNode.insertBefore(target, tds[2]); else tr.appendChild(target);
+            try {
+              var insertBeforeIndex = (tds && tds.length > 2) ? 2 : (tds && tds.length ? tds.length - 1 : -1);
+              if (insertBeforeIndex >= 0 && tds[insertBeforeIndex]) tds[insertBeforeIndex].parentNode.insertBefore(target, tds[insertBeforeIndex]); else tr.appendChild(target);
+            } catch (e) { try { tr.appendChild(target); } catch (e) { } }
           }
           try {
             target.style.padding = '0 8px';
@@ -143,10 +171,12 @@
             target.style.color = target.style.color || '#666';
             target.style.whiteSpace = 'nowrap';
           } catch (e) { }
-          target.setAttribute('data-format-key', key);
+          var normFtl = ftl ? ftl.toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim() : '';
+          var normKey = normFtl ? (nr + ' ' + normFtl) : nr;
+          target.setAttribute('data-format-key', normKey);
           target.setAttribute('data-nr', nr);
-          if (ftl) target.setAttribute('data-ftl', ftl); else target.removeAttribute('data-ftl');
-          map.set(key, target);
+          if (normFtl) target.setAttribute('data-ftl', normFtl); else target.removeAttribute('data-ftl');
+          map.set(normKey, target);
         } catch (e) { }
       });
     });
@@ -244,11 +274,11 @@
         var m = formatMaps.byFormat[currentFormat];
         if (m) {
           var f = m[nr];
-          if (f) return f;
+          if (f) return (f || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
           var nrTrim = nr.toString().replace(/^0+/, '');
-          if (nrTrim && m[nrTrim]) return m[nrTrim];
+          if (nrTrim && m[nrTrim]) return (m[nrTrim] || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
           var nrPad = nrTrim ? ('0' + nrTrim) : null;
-          if (nrPad && m[nrPad]) return m[nrPad];
+          if (nrPad && m[nrPad]) return (m[nrPad] || '').toString().replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
         }
       }
     } catch (e) { }
@@ -642,7 +672,9 @@
             if (name === 'setActiveFormat' && arguments && arguments.length) { setCurrentFormat(arguments[0]); }
             if (name === 'setDiffFormat' && arguments && arguments.length) {
               var toFmt = arguments[1]; var fromFmt = arguments[0];
-              if (typeof toFmt === 'string') setCurrentFormat(toFmt); else if (typeof fromFmt === 'string') setCurrentFormat(fromFmt);
+              if (!currentFormat) {
+                if (typeof toFmt === 'string') setCurrentFormat(toFmt); else if (typeof fromFmt === 'string') setCurrentFormat(fromFmt);
+              }
             }
           } catch (e) { }
           var r = fn.apply(this, arguments);

@@ -1,11 +1,23 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 type LiveEventIdsMessage = {
   type: "live_event_ids";
   ids: string[];
   count?: number;
   timestamp?: number;
+  payload?: string;
+};
+
+type ValueChangeMessage = {
+  type: "value_change";
+  data: {
+    type?: string;
+    payload?: string;
+    timestamp?: string;
+    [k: string]: unknown;
+  };
+  timestamp?: string;
 };
 
 type IntervalHandle = ReturnType<typeof setInterval>;
@@ -28,6 +40,8 @@ export default function TestLiveEventIdsPage() {
   const [timestamp, setTimestamp] = useState<number | undefined>(undefined);
   const [status, setStatus] = useState<"connecting" | "open" | "closed" | "error">("connecting");
   const [idTimestamps, setIdTimestamps] = useState<Map<string, number>>(new Map());
+  const [rssiInfo, setRssiInfo] = useState<Map<string, { avg?: number; antennas: number[] }>>(new Map());
+  const [avgEma, setAvgEma] = useState<Map<string, number>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closedByUserRef = useRef<boolean>(false);
@@ -65,8 +79,52 @@ export default function TestLiveEventIdsPage() {
     }
   };
 
+  // Parse OPC UA payload 
+  const parseOpcuaPayload = (payload: string) => {
+    try {
+      const cleaned = payload
+        .replace(/\\u003CSTX\\u003E/g, "")
+        .replace(/\\u003CETX\\u003E/g, "")
+        .replace(/<STX>/g, "")
+        .replace(/<ETX>/g, "")
+        .trim();
+      const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+      const result = new Map<string, { avg?: number; antennas: number[] }>();
+      for (const part of parts) {
+        // match Ausgabe:<hexid> <avg> <a1> <a2> <a3> <a4>
+        const m = part.match(/Ausgabe:([0-9A-Fa-f]+)\s+(.+)/);
+        if (!m) continue;
+        const id = m[1];
+        const nums = m[2].trim().split(/\s+/).map(t => parseInt(t, 10)).filter(n => !Number.isNaN(n));
+        if (nums.length >= 1) {
+          const avg = nums[0];
+          const antennas = nums.slice(1, 5);
+          while (antennas.length < 4) antennas.push(0);
+          result.set(id, { avg, antennas });
+        }
+      }
+      return result;
+    } catch {
+      return new Map<string, { avg?: number; antennas: number[] }>();
+    }
+  };
+
+  const rssiToColor = (rssi: number | undefined) => {
+    if (rssi === undefined) return '#9CA3AF';
+    if (rssi >= -60) return '#16a34a';
+    if (rssi >= -75) return '#a3e635';
+    if (rssi >= -90) return '#f59e0b';
+    return '#ef4444';
+  };
+
+  const rssiToPct = (rssi: number) => {
+    if (rssi <= -100) return 0;
+    if (rssi >= -40) return 100;
+    return Math.round(((rssi + 100) / 60) * 100);
+  };
+
   // Connection helper moved to component scope to flatten nested callbacks
-  const connect = (url: string) => {
+  const connect = useCallback((url: string) => {
     setStatus("connecting");
     try {
       const ws: WebSocketWithPing = new WebSocket(url) as WebSocketWithPing;
@@ -80,13 +138,60 @@ export default function TestLiveEventIdsPage() {
       ws.onmessage = (ev) => {
         try {
           if (typeof ev.data !== "string") return;
-          const data = JSON.parse(ev.data) as unknown;
-          if (
-            typeof data === "object" &&
-            data !== null &&
-            "type" in data &&
-            (data as { type?: string }).type === "live_event_ids"
-          ) {
+          let data: unknown = null;
+          try {
+            data = JSON.parse(ev.data) as unknown;
+          } catch {
+            data = null;
+          }
+
+          if (!data || typeof data !== 'object') return;
+
+          const t = (data as { type?: string }).type;
+
+          if (t === 'value_change') {
+            const vc = data as ValueChangeMessage;
+            const inner = vc.data;
+            if (inner && inner.type === 'opc_event' && typeof inner.payload === 'string') {
+              try {
+                const parsed = parseOpcuaPayload(inner.payload);
+                if (parsed.size) {
+                  const now = Date.now();
+                  setRssiInfo(prev => {
+                    const newMap = new Map(prev);
+                    parsed.forEach((v, k) => newMap.set(k, v));
+                    return newMap;
+                  });
+                  setIdTimestamps(prev => {
+                    const newMap = new Map(prev);
+                    parsed.forEach((v, k) => {
+                      if (!newMap.has(k)) newMap.set(k, now);
+                    });
+                    return newMap;
+                  });
+                  setAvgEma(prev => {
+                    const newMap = new Map(prev);
+                    const alpha = 0.25;
+                    parsed.forEach((v, k) => {
+                      if (typeof v.avg === 'number') {
+                        const prevVal = newMap.get(k) ?? v.avg;
+                        newMap.set(k, Math.round((alpha * v.avg) + ((1 - alpha) * prevVal)));
+                      }
+                    });
+                    return newMap;
+                  });
+                  setIds(prevIds => {
+                    const merged = new Set(prevIds);
+                    parsed.forEach((_v, k) => merged.add(k));
+                    return Array.from(merged);
+                  });
+                }
+              } catch { /* noop */ }
+            }
+            return;
+          }
+
+          if (t === 'live_event_ids') {
             const msg = data as LiveEventIdsMessage;
             if (Array.isArray(msg.ids)) {
               const now = Date.now();
@@ -111,6 +216,7 @@ export default function TestLiveEventIdsPage() {
             if (typeof msg.timestamp === "number") setTimestamp(msg.timestamp);
           }
         } catch {
+          // noop
         }
       };
 
@@ -131,7 +237,7 @@ export default function TestLiveEventIdsPage() {
     } catch {
       setStatus("error");
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!wsUrl) return;
@@ -152,7 +258,7 @@ export default function TestLiveEventIdsPage() {
       }
       wsRef.current = null;
     };
-  }, [wsUrl]);
+  }, [wsUrl, connect]);
 
   useEffect(() => {
     if (!wsUrl) return;
@@ -216,6 +322,13 @@ export default function TestLiveEventIdsPage() {
           {[...ids].sort((a, b) => a.localeCompare(b)).map((id) => {
             const idAge = idTimestamps.get(id);
             const isRecent = idAge && (currentTime - idAge) < 5000;
+            const info = rssiInfo.get(id);
+            const ema = avgEma.get(id);
+            const displayAvg = typeof ema === 'number' ? ema : info?.avg;
+            const best = info ? (() => {
+              const nonzero = info.antennas.filter(a => a !== 0);
+              return nonzero.length ? Math.max(...nonzero) : undefined;
+            })() : undefined;
             return (
               <li
                 key={id}
@@ -224,12 +337,47 @@ export default function TestLiveEventIdsPage() {
                   fontSize: 14,
                   wordBreak: "break-all",
                   backgroundColor: isRecent ? "#22c55e20" : "transparent",
-                  padding: "0px 1px",
-                  marginBottom: "2px"
+                  padding: "6px 8px",
+                  marginBottom: "6px",
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
                 }}
               >
-                {id}
-                {isRecent && <span style={{ color: "#22c55e", marginLeft: "8px", fontSize: "12px" }}>●</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 13 }}>{id}</div>
+                    {isRecent && <div style={{ color: "#22c55e", marginTop: 2, fontSize: 12 }}>● recent</div>}
+                  </div>
+                  {info && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 12, color: '#374151', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                        <span style={{ color: rssiToColor(best), fontWeight: 700, marginRight: 8 }}>{typeof best === 'number' ? `${best} dBm` : '—'}</span>
+                        <span style={{ fontSize: 11, opacity: 0.8 }}>best</span>
+                        <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>·</span>
+                        <span style={{ color: rssiToColor(displayAvg), fontWeight: 600, marginLeft: 8 }}>{typeof displayAvg === 'number' ? `${displayAvg} dBm` : '—'}</span>
+                        <span style={{ fontSize: 11, opacity: 0.8, marginLeft: 6 }}>avg</span>
+                      </div>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        {info.antennas.map((a, idx) => {
+                          const pct = a === 0 ? 0 : rssiToPct(a);
+                          const color = a === 0 ? '#d1d5db' : rssiToColor(a);
+                          return (
+                            <div key={idx} title={`Antenna ${idx + 1}: ${a === 0 ? 'n/a' : a + ' dBm'}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>A{idx + 1}</div>
+                              <div style={{ width: 40, height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                                <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {!info && (
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>{isRecent ? '' : ''}</div>
+                )}
               </li>
             );
           })}

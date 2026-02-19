@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-  "dev": "next dev -H 0.0.0.0 --turbopack",
+    "dev": "next dev -H 0.0.0.0 --turbopack",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
@@ -17,20 +17,27 @@
     "start:all": "concurrently \"npm run dev\" \"npm run backend\" --names \"FRONTEND,BACKEND\" --prefix-colors \"cyan,yellow\""
   },
   "dependencies": {
-    "next": "^15.5.2",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
+    "@eslint/eslintrc": "^3.3.3",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^9.2.0",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.3",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.0.0",
+    "eslint-config-next": "^16.1.6",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "ajv": "^8.18.0",
+    "minimatch": "^10.2.1",
+    "glob": "^8.1.0",
+    "rimraf": "^4.0.0",
+    "tmp": "^0.2.4"
   }
 }

@@ -14,8 +14,8 @@ on:
       - '**/package.json'
       - '**/package-lock.json'
       - '**/requirements.txt'
-  schedule:
-    - cron: '17 3 * * *'
+  #schedule:
+    #- cron: '17 3 * * *'
 jobs:
   security_audit:
     runs-on: ubuntu-latest

@@ -182,7 +182,7 @@ export default function SomicPage() {
             </label>
             <input
               type="password"
-              className="w-full px-2 py-2 border rounded text-white"
+              className="w-full px-2 py-2 border rounded text-black dark:text-white"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoFocus

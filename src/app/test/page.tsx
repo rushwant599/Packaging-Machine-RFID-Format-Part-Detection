@@ -319,7 +319,12 @@ export default function TestLiveEventIdsPage() {
         <p style={{ fontSize: 14, opacity: 0.8 }}>Keine IDs empfangen.</p>
       ) : (
         <ul style={{ paddingLeft: 20 }}>
-          {[...ids].sort((a, b) => a.localeCompare(b)).map((id) => {
+          {[...ids].sort((a, b) => {
+            const ta = idTimestamps.get(a) ?? 0;
+            const tb = idTimestamps.get(b) ?? 0;
+            if (ta !== tb) return tb - ta;
+            return a.localeCompare(b);
+          }).map((id) => {
             const idAge = idTimestamps.get(id);
             const isRecent = idAge && (currentTime - idAge) < 5000;
             const info = rssiInfo.get(id);

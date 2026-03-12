@@ -109,13 +109,14 @@ function updateDropdowns() {
 
     const optEmpty = document.createElement('option');
     optEmpty.value = "";
-    optEmpty.textContent = "(unassigned)";
+    optEmpty.textContent = (window.getTranslation ? window.getTranslation('unassigned') : '(unassigned)');
     select.appendChild(optEmpty);
 
     if (currentAssigned) {
       const optCurr = document.createElement('option');
       optCurr.value = currentAssigned;
-      optCurr.textContent = `${currentAssigned} (assigned)`;
+      const assignedLabel = (window.getTranslation ? window.getTranslation('assigned_label') : '(assigned)');
+      optCurr.textContent = `${currentAssigned} ${assignedLabel}`;
       optCurr.style.backgroundColor = '#d4edda';
       optCurr.style.color = '#155724';
       select.appendChild(optCurr);
@@ -133,7 +134,9 @@ function updateDropdowns() {
     usedElsewhere.forEach(tag => {
       const opt = document.createElement('option');
       opt.value = tag;
-      opt.textContent = `${tag} (assigned to ${assignedByTag[tag]})`;
+      const tpl = (window.getTranslation ? window.getTranslation('assigned_to') : '(assigned to %s)');
+      const txt = (window.formatTranslation ? window.formatTranslation(tpl, assignedByTag[tag]) : `${tag} (assigned to ${assignedByTag[tag]})`);
+      opt.textContent = `${tag} ${txt.replace('%s','')}`;
       opt.disabled = true;
       opt.style.backgroundColor = '#d4edda';
       opt.style.color = '#155724';
@@ -206,8 +209,10 @@ function updatePartsDisplay() {
   allList.innerHTML = '';
   assignedList.innerHTML = '';
   if (formatParts.length === 0) {
-    allList.innerHTML = '<div class="no-parts">No format parts available. Please upload an HTML file first.</div>';
-    assignedList.innerHTML = '<div class="no-parts">No parts to assign.</div>';
+    const noParts = (window.getTranslation ? window.getTranslation('no_format_parts') : 'No format parts available. Please upload an HTML file first.');
+    const noAssign = (window.getTranslation ? window.getTranslation('no_parts_to_assign') : 'No parts to assign.');
+    allList.innerHTML = `<div class="no-parts">${noParts}</div>`;
+    assignedList.innerHTML = `<div class="no-parts">${noAssign}</div>`;
     return;
   }
 
@@ -217,7 +222,7 @@ function updatePartsDisplay() {
     row.innerHTML = `
       <label>${p.id}</label>
       <select id="select-${p.id}" class="rfid-select"></select>
-      <button onclick="assignRFID('${p.id}')">Assign</button>
+      <button onclick="assignRFID('${p.id}')">${window.getTranslation ? window.getTranslation('assign') : 'Assign'}</button>
     `;
     allList.appendChild(row);
 
@@ -226,8 +231,8 @@ function updatePartsDisplay() {
     assigned.innerHTML = `
       <label>${p.id}</label>
       <input type="checkbox" id="check-${p.id}" class="assign-check" disabled>
-      <button onClick="showPicture('${p.id}')">Show picture</button>
-  <button onClick="openUpload('${p.id}')">Upload</button>
+      <button onClick="showPicture('${p.id}')">${window.getTranslation ? window.getTranslation('show_picture') : 'Show picture'}</button>
+  <button onClick="openUpload('${p.id}')">${window.getTranslation ? window.getTranslation('upload') : 'Upload'}</button>
     `;
     assignedList.appendChild(assigned);
   });
@@ -402,7 +407,7 @@ function openUpload(partId) {
   uploadPartId = partId;
   const modal = ensureUploadModal();
   modal.style.display = 'flex';
-  modal.querySelector('#upload-title').textContent = `Upload Bild für ${partId}`;
+  modal.querySelector('#upload-title').textContent = (window.formatTranslation ? window.formatTranslation(window.getTranslation('upload_image'), partId) : `Upload Bild für ${partId}`);
 }
 
 // Close upload modal

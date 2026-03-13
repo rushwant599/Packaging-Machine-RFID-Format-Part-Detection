@@ -59,6 +59,13 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 logger.info(f"Configuration loaded:")
 logger.info(f"  - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
 
+# Live event retention configurable via environment variable (default 8.0 seconds)
+try:
+    LIVE_EVENT_RETENTION_SEC = float(os.getenv("LIVE_EVENT_RETENTION_SEC", "8.0"))
+except Exception:
+    LIVE_EVENT_RETENTION_SEC = 8.0
+logger.info(f"Live event retention (seconds): {LIVE_EVENT_RETENTION_SEC}")
+
 # Initialize managers
 opc_manager = None
 format_manager = None
@@ -190,7 +197,7 @@ async def lifespan(app: FastAPI):
                     else:
                         _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
                 try:
-                    cutoff = now_ts - 8.0
+                    cutoff = now_ts - LIVE_EVENT_RETENTION_SEC
                     to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
                     for k in to_delete:
                         _live_event_hex_ids.pop(k, None)
@@ -217,7 +224,7 @@ async def lifespan(app: FastAPI):
             try:
                 await _a.sleep(1.0)
                 now_ts = time.time()
-                cutoff = now_ts - 8.0
+                cutoff = now_ts - LIVE_EVENT_RETENTION_SEC
                 to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
                 for k in to_delete:
                     _live_event_hex_ids.pop(k, None)
@@ -1362,10 +1369,10 @@ def extract_hex_ids_from_payload(payload: str):
     return ordered
 
 @app.get("/api/live-event-ids")
-async def get_live_event_ids(window_sec: float = 5.0):
+async def get_live_event_ids(window_sec: float = LIVE_EVENT_RETENTION_SEC):
     """Get live RFID event hex IDs seen within the specified time window."""
     if window_sec <= 0:
-        window_sec = 8.0
+        window_sec = LIVE_EVENT_RETENTION_SEC
     running = bool(opc_event_listener and opc_event_listener.is_running())
     now_ts = time.time()
     cutoff = now_ts - window_sec

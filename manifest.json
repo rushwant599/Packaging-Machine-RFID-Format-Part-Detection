@@ -1,0 +1,26 @@
+{
+    "$schema": "https://raw.githubusercontent.com/FLECS-Technologies/app-sdk/3.0.0/manifest.schema.json",
+    "_schemaVersion": "3.0.0",
+    "app": "com.somic-packaging.lynx",
+    "version": "v0.1.2",
+    "revision": "0",
+    "image": "flecs.azurecr.io/com.somic-packaging.lynx",
+    "multiInstance": false,
+    "editors": [
+        {
+            "name": "Somic Lynx",
+            "port": 80,
+            "supportsReverseProxy": false
+        }
+    ],
+    "ports": [
+        "4400:443",
+        "4444:80"
+    ],
+    "volumes": [
+        "/home/somic/app/lynx:/app/data"
+    ],
+    "env": [
+        "LIVE_EVENT_RETENTION_SEC=10"
+    ]
+}

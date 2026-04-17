@@ -20,12 +20,17 @@ class FormatDataParser:
     # Resolve preferred path
     def _resolve_preferred_path(self, path: Path) -> Path:
         try:
-            injected_names = {
-                "customer-html-cache.html",
-                "customer-html-cache.injected.html",
-            }
-            if path.name in injected_names:
-                original = path.with_name("customer-html-cache.original.html")
+            m = re.match(r"^(customer-html-cache)(?:\.([a-z0-9_-]+))?(?:\.(injected|original))?\.html$", path.name)
+            if m:
+                base = m.group(1)
+                lang = m.group(2)
+                variant = m.group(3)
+                if variant == "original":
+                    return path
+                if lang:
+                    original = path.with_name(f"{base}.{lang}.original.html")
+                else:
+                    original = path.with_name(f"{base}.original.html")
                 if original.exists():
                     return original
         except Exception:

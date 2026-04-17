@@ -474,11 +474,17 @@ async function handleFileSelected(ev) {
     const form = new FormData();
     form.append('file', file);
     const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
-    const data = await resp.json();
-    if (resp.ok && data.success) {
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    const data = contentType.includes('application/json') ? await resp.json() : null;
+    if (resp.ok && data && data.success) {
       status.textContent = 'Upload erfolgreich';
     } else {
-      status.textContent = 'Fehler beim Upload';
+      if (resp.status === 413) {
+        status.textContent = 'Fehler: Bild ist zu gross (HTTP 413)';
+      } else {
+        const detail = data && (data.detail || data.message);
+        status.textContent = detail ? `Fehler beim Upload: ${detail}` : `Fehler beim Upload (HTTP ${resp.status})`;
+      }
     }
   } catch (e) {
     status.textContent = 'Fehler: ' + e;
@@ -644,11 +650,17 @@ async function takeSnapshot() {
     const form = new FormData();
     form.append('image_base64', dataUrl);
     const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
-    const data = await resp.json();
-    if (resp.ok && data.success) {
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    const data = contentType.includes('application/json') ? await resp.json() : null;
+    if (resp.ok && data && data.success) {
       status.textContent = 'Foto gespeichert';
     } else {
-      status.textContent = 'Fehler beim Speichern';
+      if (resp.status === 413) {
+        status.textContent = 'Fehler: Foto ist zu gross (HTTP 413)';
+      } else {
+        const detail = data && (data.detail || data.message);
+        status.textContent = detail ? `Fehler beim Speichern: ${detail}` : `Fehler beim Speichern (HTTP ${resp.status})`;
+      }
     }
   } catch (e) {
     status.textContent = 'Fehler: ' + e;

@@ -38,6 +38,13 @@ function isSecureForCamera() {
   return false;
 }
 
+function sortAlphaNumeric(values) {
+  return [...values].sort((a, b) => String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: 'base'
+  }));
+}
+
 // Load format parts from API
 async function loadFormatParts() {
   try {
@@ -76,7 +83,8 @@ async function readRFIDTags() {
     if (!response.ok) throw new Error(`HTTP error ${response.status}`);
     const data = await response.json();
     if (data.success && Array.isArray(data.tagIds)) {
-      rfidTags = ["", ...data.tagIds];
+      const sortedTagIds = sortAlphaNumeric(data.tagIds);
+      rfidTags = ["", ...sortedTagIds];
       console.log(`Loaded ${data.tagIds.length} RFID tags.`);
       updateDropdowns();
       return;
@@ -216,7 +224,9 @@ function updatePartsDisplay() {
     return;
   }
 
-  formatParts.forEach(p => {
+  const sortedParts = sortAlphaNumeric(formatParts.map(p => p.id));
+  sortedParts.forEach(partId => {
+    const p = { id: partId };
     const row = document.createElement('div');
     row.className = 'part-entry';
     row.innerHTML = `

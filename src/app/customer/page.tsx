@@ -230,6 +230,16 @@ export default function CustomerPage() {
   const [diffMode, setDiffMode] = useState<boolean>(false);
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
+  const getFormatDisplayName = useCallback((formatKey: string) => {
+    const formatEntry = formats[formatKey];
+    if (formatEntry && typeof formatEntry === 'object') {
+      const name = (formatEntry as { name?: unknown }).name;
+      if (typeof name === 'string' && name.trim()) {
+        return name.trim();
+      }
+    }
+    return formatKey;
+  }, [formats]);
   const STEP_FONT_SIZE = React.useMemo(() => {
     if (width < 380) return '.58rem';
     if (width < 440) return '.62rem';
@@ -886,7 +896,7 @@ export default function CustomerPage() {
                       style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}
                     >
                       <option value=''>{t('choose_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                     {selectedFormat && <button title={t('reset_format_title')} onClick={() => { setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding: '4px 6px', background: '#f4f4f4', color: '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>{t('reset')}</button>}
                   </>
@@ -896,12 +906,12 @@ export default function CustomerPage() {
                     <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('from')}</label>
                     <select id="fromFormat" value={fromFormat || ''} onChange={e => { setFromFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>{t('source_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                     <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('to')}</label>
                     <select id="toFormat" value={toFormat || ''} onChange={e => { setToFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>{t('target_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                   </>
                 )}

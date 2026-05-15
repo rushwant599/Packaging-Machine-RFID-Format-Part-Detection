@@ -113,15 +113,19 @@ class APIClient {
   }
 
   // Customer HTML operations
-  async getCustomerHTML(): Promise<string> {
-    const response = await fetch(`${this.baseURL}/api/customer-html`);
+  async getCustomerHTML(lang?: string): Promise<string> {
+    const qs = new URLSearchParams();
+    if (lang) qs.set('lang', lang);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await fetch(`${this.baseURL}/api/customer-html${suffix}`);
     return response.text();
   }
 
   // Upload customer HTML file
-  async uploadCustomerHTML(file: File): Promise<string> {
+  async uploadCustomerHTML(file: File, lang?: string): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
+    if (lang) formData.append('lang', lang);
 
     const response = await fetch(`${this.baseURL}/api/customer-html`, {
       method: 'POST',
@@ -140,8 +144,10 @@ class APIClient {
   }
 
   // Format data operations
-  async getFormatData() {
-    return this.request('/api/format-data');
+  async getFormatData(lang?: string) {
+    const qs = new URLSearchParams();
+    if (lang) qs.set('lang', lang);
+    return this.request(`/api/format-data${qs.toString() ? `?${qs.toString()}` : ''}`);
   }
 
   async getFormatParts(): Promise<{ formatParts: string[], count: number, message: string }> {
@@ -149,26 +155,31 @@ class APIClient {
   }
 
   // Main table rows (parsed <tr> blocks)
-  async getMainTableRows(options?: { asHtml?: boolean; withMeta?: boolean; duplicateCaption?: boolean; stripWhitespace?: boolean }) {
-    const { asHtml = false, withMeta = true, duplicateCaption = true, stripWhitespace = false } = options || {};
+  async getMainTableRows(options?: { asHtml?: boolean; withMeta?: boolean; duplicateCaption?: boolean; stripWhitespace?: boolean; lang?: string }) {
+    const { asHtml = false, withMeta = true, duplicateCaption = true, stripWhitespace = false, lang } = options || {};
     const qs = new URLSearchParams({
       as_html: asHtml ? 'true' : 'false',
       with_meta: withMeta ? 'true' : 'false',
       duplicate_caption: duplicateCaption ? 'true' : 'false',
       strip_whitespace: stripWhitespace ? 'true' : 'false'
     });
+    if (lang) qs.set('lang', lang);
     const endpoint = `/api/main-table-rows?${qs.toString()}`;
     return this.request(endpoint);
   }
 
   // Formats
-  async getFormats() {
-    return this.request('/api/formats');
+  async getFormats(lang?: string) {
+    const qs = new URLSearchParams();
+    if (lang) qs.set('lang', lang);
+    return this.request(`/api/formats${qs.toString() ? `?${qs.toString()}` : ''}`);
   }
 
   // Format parts per format
-  async getFormatPartsPerFormat() {
-    return this.request('/api/format-parts-per-format');
+  async getFormatPartsPerFormat(lang?: string) {
+    const qs = new URLSearchParams();
+    if (lang) qs.set('lang', lang);
+    return this.request(`/api/format-parts-per-format${qs.toString() ? `?${qs.toString()}` : ''}`);
   }
 
   // Format part assignments

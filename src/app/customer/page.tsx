@@ -230,6 +230,16 @@ export default function CustomerPage() {
   const [diffMode, setDiffMode] = useState<boolean>(false);
   const [formatLoading, setFormatLoading] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
+  const getFormatDisplayName = useCallback((formatKey: string) => {
+    const formatEntry = formats[formatKey];
+    if (formatEntry && typeof formatEntry === 'object') {
+      const name = (formatEntry as { name?: unknown }).name;
+      if (typeof name === 'string' && name.trim()) {
+        return name.trim();
+      }
+    }
+    return formatKey;
+  }, [formats]);
   const STEP_FONT_SIZE = React.useMemo(() => {
     if (width < 380) return '.58rem';
     if (width < 440) return '.62rem';
@@ -265,31 +275,42 @@ export default function CustomerPage() {
 
   // Beim Laden die aktuelle Datei vom Server holen
   useEffect(() => {
-    fetch("/api/customer-html")
-      .then((res) => (res.ok ? res.text() : null))
+    let activeUrl: string | null = null;
+    apiClient.getCustomerHTML(lang)
       .then((html) => {
-        if (html) {
-          let injectedHtml = html;
-          try {
-            const safeOrigin = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? BACKEND_URL : (typeof window !== 'undefined' ? window.location.origin : '');
-            if (safeOrigin && /<head\b[^>]*>/i.test(injectedHtml)) {
-              injectedHtml = injectedHtml.replace(/<head(\b[^>]*)>/i, `<head$1><meta name="somic-backend-origin" content="${safeOrigin}">`);
-            } else if (safeOrigin) {
-              injectedHtml = `<meta name="somic-backend-origin" content="${safeOrigin}">` + injectedHtml;
-            }
-          } catch { /* ignore */ }
-          const blob = new Blob([injectedHtml], { type: "text/html" });
-          setFileUrl(URL.createObjectURL(blob));
-          try {
-            const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(injectedHtml);
-            if (m && m[0]) setFooterHtml(m[0]);
-            else setFooterHtml(null);
-          } catch {
-            setFooterHtml(null);
-          }
+        if (!html) {
+          setFileUrl(null);
+          setFooterHtml(null);
+          return;
         }
+        let injectedHtml = html;
+        try {
+          const safeOrigin = (typeof BACKEND_URL === 'string' && BACKEND_URL) ? BACKEND_URL : (typeof window !== 'undefined' ? window.location.origin : '');
+          if (safeOrigin && /<head\b[^>]*>/i.test(injectedHtml)) {
+            injectedHtml = injectedHtml.replace(/<head(\b[^>]*)>/i, `<head$1><meta name="somic-backend-origin" content="${safeOrigin}">`);
+          } else if (safeOrigin) {
+            injectedHtml = `<meta name="somic-backend-origin" content="${safeOrigin}">` + injectedHtml;
+          }
+        } catch { /* ignore */ }
+        const blob = new Blob([injectedHtml], { type: "text/html" });
+        activeUrl = URL.createObjectURL(blob);
+        setFileUrl(activeUrl);
+        try {
+          const m = /<footer\b[^>]*>[\s\S]*?<\/footer>/i.exec(injectedHtml);
+          if (m && m[0]) setFooterHtml(m[0]);
+          else setFooterHtml(null);
+        } catch {
+          setFooterHtml(null);
+        }
+      })
+      .catch(() => {
+        setFileUrl(null);
+        setFooterHtml(null);
       });
-  }, []);
+    return () => {
+      if (activeUrl) URL.revokeObjectURL(activeUrl);
+    };
+  }, [lang]);
 
   // Page Scroll komplett deaktivieren
   useEffect(() => {
@@ -321,7 +342,7 @@ export default function CustomerPage() {
       setStepsLoading(true);
       setStepsError(null);
       try {
-        const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false }) as { rowsMeta?: RowMeta[] };
+        const data = await apiClient.getMainTableRows({ asHtml: true, withMeta: true, duplicateCaption: false, lang }) as { rowsMeta?: RowMeta[] };
         const rowsMeta = data.rowsMeta;
         if (!rowsMeta) { setSteps([]); return; }
         setSteps(prepareSteps(rowsMeta, STEP_FONT_SIZE));
@@ -333,14 +354,14 @@ export default function CustomerPage() {
       }
     };
     loadSteps();
-  }, [STEP_FONT_SIZE, t]);
+  }, [STEP_FONT_SIZE, t, lang]);
 
   // Formate laden
   useEffect(() => {
     const loadFormats = async () => {
       setFormatLoading(true); setFormatError(null);
       try {
-        const json = await apiClient.getFormats() as { formats?: Record<string, unknown> };
+        const json = await apiClient.getFormats(lang) as { formats?: Record<string, unknown> };
         const fmts = json.formats || {};
         setFormats(fmts);
         setFormatNames(Object.keys(fmts));
@@ -349,7 +370,7 @@ export default function CustomerPage() {
       } finally { setFormatLoading(false); }
     };
     loadFormats();
-  }, [t]);
+  }, [t, lang]);
 
   // Format-Detaildaten (inkl. valueIndexMap) laden sobald ein Format gewählt ist
   const [formatDetail, setFormatDetail] = React.useState<FormatDetail | null>(null);
@@ -359,7 +380,7 @@ export default function CustomerPage() {
     const loadDetail = async () => {
       if (!selectedFormat) { setFormatDetail(null); return; }
       try {
-        const detail = await apiClient.getFormatData() as FormatDataApiResponse;
+        const detail = await apiClient.getFormatData(lang) as FormatDataApiResponse;
         if (!cancelled && detail?.success && detail.data) {
           setFormatDetail(detail.data);
         }
@@ -369,7 +390,7 @@ export default function CustomerPage() {
     };
     loadDetail();
     return () => { cancelled = true; };
-  }, [selectedFormat]);
+  }, [selectedFormat, lang]);
 
   // Hilfsfunktion: Injiziere Formatwerte in Steps zurück
   const injectFormat = useCallback((formatName: string | null) => {
@@ -392,7 +413,14 @@ export default function CustomerPage() {
       const val = (rawVal || '').toString().trim();
       const ftl = (it.formatPart || '').toString().trim();
       const cart = (it.cart || '').toString().trim();
-      const isPlaceholder = val.toLowerCase() === 'wert' && (ftl.toLowerCase() === 'ftl.' || ftl.toLowerCase() === 'ftl') && cart.toLowerCase() === 'wagen';
+      const valNorm = val.toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
+      const ftlNorm = ftl.toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
+      const cartNorm = cart.toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
+      const isHeaderPlaceholder =
+        (valNorm === 'wert' || valNorm === 'value')
+        && (ftlNorm === 'ftl' || ftlNorm === 'fp')
+        && (cartNorm === 'wagen' || cartNorm === 'carriage' || cartNorm === 'cart');
+      const isPlaceholder = isHeaderPlaceholder && idx === 0;
       if (isPlaceholder) return;
       if (visible) {
         if (val && !numberToValue[visible]) numberToValue[visible] = val;
@@ -868,7 +896,7 @@ export default function CustomerPage() {
                       style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}
                     >
                       <option value=''>{t('choose_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                     {selectedFormat && <button title={t('reset_format_title')} onClick={() => { setSelectedFormat(null); setCurrentStep(0); }} style={{ fontSize: '.65rem', padding: '4px 6px', background: '#f4f4f4', color: '#222', border: '1px solid #bbb', borderRadius: 4, cursor: 'pointer' }}>{t('reset')}</button>}
                   </>
@@ -878,12 +906,12 @@ export default function CustomerPage() {
                     <label htmlFor="fromFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('from')}</label>
                     <select id="fromFormat" value={fromFormat || ''} onChange={e => { setFromFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>{t('source_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                     <label htmlFor="toFormat" style={{ fontSize: '.7rem', fontWeight: 600, color: '#222' }}>{t('to')}</label>
                     <select id="toFormat" value={toFormat || ''} onChange={e => { setToFormat(e.target.value || null); setCurrentStep(0); }} style={{ fontSize: '.75rem', padding: '4px 6px', border: '1px solid #bbb', borderRadius: 4, background: '#fff', color: '#111', fontWeight: 500 }}>
                       <option value=''>{t('target_placeholder')}</option>
-                      {formatNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      {formatNames.map(n => <option key={n} value={n}>{getFormatDisplayName(n)}</option>)}
                     </select>
                   </>
                 )}

@@ -59,6 +59,13 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 logger.info(f"Configuration loaded:")
 logger.info(f"  - Host: {BACKEND_HOST}, Port: {BACKEND_PORT}, Debug: {DEBUG}")
 
+# Live event retention configurable via environment variable (default 8.0 seconds)
+try:
+    LIVE_EVENT_RETENTION_SEC = float(os.getenv("LIVE_EVENT_RETENTION_SEC", "8.0"))
+except Exception:
+    LIVE_EVENT_RETENTION_SEC = 8.0
+logger.info(f"Live event retention (seconds): {LIVE_EVENT_RETENTION_SEC}")
+
 # Initialize managers
 opc_manager = None
 format_manager = None
@@ -190,7 +197,7 @@ async def lifespan(app: FastAPI):
                     else:
                         _live_event_hex_ids[hx] = {"first_seen": now_ts, "last_seen": now_ts, "count": 1}
                 try:
-                    cutoff = now_ts - 8.0
+                    cutoff = now_ts - LIVE_EVENT_RETENTION_SEC
                     to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
                     for k in to_delete:
                         _live_event_hex_ids.pop(k, None)
@@ -217,7 +224,7 @@ async def lifespan(app: FastAPI):
             try:
                 await _a.sleep(1.0)
                 now_ts = time.time()
-                cutoff = now_ts - 8.0
+                cutoff = now_ts - LIVE_EVENT_RETENTION_SEC
                 to_delete = [k for k, v in _live_event_hex_ids.items() if v["last_seen"] < cutoff]
                 for k in to_delete:
                     _live_event_hex_ids.pop(k, None)
@@ -355,6 +362,50 @@ HTML_CACHE_PATH = CACHE_DIR / "customer-html-cache.html"
 HTML_CACHE_ORIGINAL_PATH = CACHE_DIR / "customer-html-cache.original.html"
 HTML_CACHE_INJECTED_COPY_PATH = CACHE_DIR / "customer-html-cache.injected.html"
 
+DEFAULT_HTML_LANG = "default"
+
+
+def _normalize_html_lang(lang: str | None) -> str:
+    if not lang:
+        return DEFAULT_HTML_LANG
+    cleaned = "".join(ch for ch in lang.strip().lower() if ch.isalnum() or ch in ("-", "_"))
+    if not cleaned:
+        return DEFAULT_HTML_LANG
+    if cleaned in ("default", "fallback"):
+        return DEFAULT_HTML_LANG
+    return cleaned[:24]
+
+
+def _build_lang_cache_paths(lang: str | None) -> tuple[str, Path, Path, Path]:
+    normalized_lang = _normalize_html_lang(lang)
+    if normalized_lang == DEFAULT_HTML_LANG:
+        return (
+            normalized_lang,
+            HTML_CACHE_PATH,
+            HTML_CACHE_ORIGINAL_PATH,
+            HTML_CACHE_INJECTED_COPY_PATH,
+        )
+    return (
+        normalized_lang,
+        CACHE_DIR / f"customer-html-cache.{normalized_lang}.html",
+        CACHE_DIR / f"customer-html-cache.{normalized_lang}.original.html",
+        CACHE_DIR / f"customer-html-cache.{normalized_lang}.injected.html",
+    )
+
+
+def _resolve_existing_lang_cache_paths(lang: str | None) -> tuple[str, Path, Path, Path]:
+    normalized_lang, cache_path, original_path, injected_copy_path = _build_lang_cache_paths(lang)
+    if cache_path.exists() or original_path.exists() or normalized_lang == DEFAULT_HTML_LANG:
+        return normalized_lang, cache_path, original_path, injected_copy_path
+    return _build_lang_cache_paths(DEFAULT_HTML_LANG)
+
+
+def _get_format_manager_for_lang(lang: str | None) -> FormatDataManager:
+    _, cache_path, _, _ = _resolve_existing_lang_cache_paths(lang)
+    if cache_path == HTML_CACHE_PATH and format_manager is not None:
+        return format_manager
+    return FormatDataManager(str(cache_path))
+
 # Pydantic models for request/response
 class PasswordRequest(BaseModel):
     password: str
@@ -449,20 +500,21 @@ async def verify_password(request: PasswordRequest):
         return PasswordResponse(success=False, message="Falsches Passwort!")
 
 @app.get("/api/customer-html")
-async def get_customer_html(request: Request, original: bool = False):
+async def get_customer_html(request: Request, original: bool = False, lang: Optional[str] = None):
     """Get cached customer HTML"""
     try:
-        if original and HTML_CACHE_ORIGINAL_PATH.exists():
-            with open(HTML_CACHE_ORIGINAL_PATH, "r", encoding="utf-8") as f:
+        normalized_lang, cache_path, original_path, _ = _resolve_existing_lang_cache_paths(lang)
+        if original and original_path.exists():
+            with open(original_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            return HTMLResponse(content=content)
-        if HTML_CACHE_PATH.exists():
+            return HTMLResponse(content=content, headers={"X-Somic-HTML-Lang": normalized_lang})
+        if cache_path.exists():
             try:
-                raw = HTML_CACHE_PATH.read_text(encoding="utf-8", errors="ignore")
+                raw = cache_path.read_text(encoding="utf-8", errors="ignore")
                 soup = BeautifulSoup(raw, "lxml")
             except Exception:
                 try:
-                    raw = HTML_CACHE_PATH.read_text(encoding="utf-8", errors="ignore")
+                    raw = cache_path.read_text(encoding="utf-8", errors="ignore")
                     soup = BeautifulSoup(raw, "html.parser")
                 except Exception:
                     soup = None
@@ -490,10 +542,10 @@ async def get_customer_html(request: Request, original: bool = False):
                         script_tag.string = script_code
                 except Exception:
                     pass
-                return HTMLResponse(content=str(soup))
-            with open(HTML_CACHE_PATH, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=str(soup), headers={"X-Somic-HTML-Lang": normalized_lang})
+            with open(cache_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            return HTMLResponse(content=content)
+            return HTMLResponse(content=content, headers={"X-Somic-HTML-Lang": normalized_lang})
         else:
             return HTMLResponse(content="", status_code=200)
     except Exception as e:
@@ -506,13 +558,15 @@ async def get_main_table_rows(
     as_html: bool = True,
     strip_whitespace: bool = False,
     with_meta: bool = False,
-    duplicate_caption: bool = False
+    duplicate_caption: bool = False,
+    lang: Optional[str] = None,
 ):
     """Extract main table rows from cached HTML"""
-    if not HTML_CACHE_PATH.exists():
+    normalized_lang, cache_path, _, _ = _resolve_existing_lang_cache_paths(lang)
+    if not cache_path.exists():
         raise HTTPException(status_code=404, detail="customer-html-cache.html not found. Upload a file first.")
     try:
-        extractor = MainTableRowExtractor(str(HTML_CACHE_PATH))
+        extractor = MainTableRowExtractor(str(cache_path))
         rows = extractor.extract_rows(
             as_html=as_html,
             strip_whitespace=strip_whitespace,
@@ -525,6 +579,7 @@ async def get_main_table_rows(
             "as_html": as_html,
             "with_meta": with_meta,
             "duplicate_caption": duplicate_caption,
+            "lang": normalized_lang,
         }
         if with_meta:
             resp["rowsMeta"] = rows
@@ -538,11 +593,13 @@ async def get_main_table_rows(
         raise HTTPException(status_code=500, detail="Error extracting rows")
 
 @app.post("/api/customer-html")
-async def upload_customer_html(file: UploadFile = File(...)):
+async def upload_customer_html(request: Request, file: UploadFile = File(...), lang: Optional[str] = Form(None)):
     """Upload and cache customer HTML"""
     try:
         if not file:
             raise HTTPException(status_code=400, detail="No file uploaded")
+        lang_value = lang or request.query_params.get("lang")
+        normalized_lang, cache_path, original_path, injected_copy_path = _build_lang_cache_paths(lang_value)
         
         content = await file.read()
         html_text = content.decode("utf-8")
@@ -724,21 +781,29 @@ async def upload_customer_html(file: UploadFile = File(...)):
         injected_html = inject_rfid_column_and_ws(html_text)
 
         try:
-            with open(HTML_CACHE_ORIGINAL_PATH, "wb") as f_orig:
+            with open(original_path, "wb") as f_orig:
                 f_orig.write(content)
-            logger.info("Saved original HTML upload to %s (%d bytes)", HTML_CACHE_ORIGINAL_PATH, len(content))
+            logger.info("Saved original HTML upload to %s (%d bytes), lang=%s", original_path, len(content), normalized_lang)
         except Exception as we:  # noqa: BLE001
-            logger.error("Failed to save original HTML to %s: %s", HTML_CACHE_ORIGINAL_PATH, we)
+            logger.error("Failed to save original HTML to %s: %s", original_path, we)
 
-        with open(HTML_CACHE_PATH, "w", encoding="utf-8") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             f.write(injected_html)
         try:
-            with open(HTML_CACHE_INJECTED_COPY_PATH, "w", encoding="utf-8") as f_inj:
+            with open(injected_copy_path, "w", encoding="utf-8") as f_inj:
                 f_inj.write(injected_html)
         except Exception as we:  # noqa: BLE001
-            logger.debug("Optional write of injected copy failed (%s): %s", HTML_CACHE_INJECTED_COPY_PATH, we)
+            logger.debug("Optional write of injected copy failed (%s): %s", injected_copy_path, we)
 
-        return HTMLResponse(content=injected_html)
+        if cache_path != HTML_CACHE_PATH:
+            try:
+                HTML_CACHE_PATH.write_text(injected_html, encoding="utf-8")
+                HTML_CACHE_INJECTED_COPY_PATH.write_text(injected_html, encoding="utf-8")
+                HTML_CACHE_ORIGINAL_PATH.write_bytes(content)
+            except Exception as we:  # noqa: BLE001
+                logger.debug("Legacy cache mirror write failed for lang=%s: %s", normalized_lang, we)
+
+        return HTMLResponse(content=injected_html, headers={"X-Somic-HTML-Lang": normalized_lang})
     except Exception as e:
         logger.error(f"Error uploading HTML file: {e}")
         raise HTTPException(status_code=500, detail="Error processing uploaded file")
@@ -746,17 +811,18 @@ async def upload_customer_html(file: UploadFile = File(...)):
 
 # Format Data Endpoints (using FormatDataManager)
 @app.get("/api/format-data")
-async def get_format_data():
+async def get_format_data(lang: Optional[str] = None):
     """Parse and return format data from customer HTML cache"""
     try:
-        if not format_manager.file_exists():
+        current_manager = _get_format_manager_for_lang(lang)
+        if not current_manager.file_exists():
             return FormatParseResponse(
                 success=False,
                 message="Customer HTML cache file not found. Please upload a file first.",
                 data={}
             )
         
-        format_data = format_manager.get_format_data()
+        format_data = current_manager.get_format_data()
         
         if not format_data:
             return FormatParseResponse(
@@ -778,37 +844,37 @@ async def get_format_data():
         raise HTTPException(status_code=500, detail="Internal server error while parsing format data")
 
 @app.get("/api/format-parts")
-async def get_format_parts():
+async def get_format_parts(lang: Optional[str] = None):
     """Get only the format parts list"""
     try:
-        return format_manager.get_format_parts()
+        return _get_format_manager_for_lang(lang).get_format_parts()
     except Exception as e:
         logger.error(f"Error getting format parts: {e}")
         return {"formatParts": [], "error": str(e)}
 
 @app.get("/api/formats")
-async def get_formats():
+async def get_formats(lang: Optional[str] = None):
     """Get the complete formats data"""
     try:
-        return format_manager.get_formats()
+        return _get_format_manager_for_lang(lang).get_formats()
     except Exception as e:
         logger.error(f"Error getting formats: {e}")
         return {"formats": {}, "error": str(e)}
 
 @app.get("/api/format-parts-per-format")
-async def get_format_parts_per_format():
+async def get_format_parts_per_format(lang: Optional[str] = None):
     """Get format parts grouped by format"""
     try:
-        return format_manager.get_format_parts_per_format()
+        return _get_format_manager_for_lang(lang).get_format_parts_per_format()
     except Exception as e:
         logger.error(f"Error getting format parts per format: {e}")
         return {"formatPartsPerFormat": {}, "error": str(e)}
 
 @app.get("/api/format-parts-per-format-with-index")
-async def get_format_parts_per_format_with_index():
+async def get_format_parts_per_format_with_index(lang: Optional[str] = None):
     """Get combined valueIndex + part entries grouped by format"""
     try:
-        return format_manager.get_format_parts_per_format_with_index()
+        return _get_format_manager_for_lang(lang).get_format_parts_per_format_with_index()
     except Exception as e:
         logger.error(f"Error getting format parts per format with index: {e}")
         return {"formatPartsPerFormatWithIndex": {}, "error": str(e)}
@@ -1362,10 +1428,10 @@ def extract_hex_ids_from_payload(payload: str):
     return ordered
 
 @app.get("/api/live-event-ids")
-async def get_live_event_ids(window_sec: float = 5.0):
+async def get_live_event_ids(window_sec: float = LIVE_EVENT_RETENTION_SEC):
     """Get live RFID event hex IDs seen within the specified time window."""
     if window_sec <= 0:
-        window_sec = 8.0
+        window_sec = LIVE_EVENT_RETENTION_SEC
     running = bool(opc_event_listener and opc_event_listener.is_running())
     now_ts = time.time()
     cutoff = now_ts - window_sec

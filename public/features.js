@@ -38,6 +38,13 @@ function isSecureForCamera() {
   return false;
 }
 
+function sortAlphaNumeric(values) {
+  return [...values].sort((a, b) => String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: 'base'
+  }));
+}
+
 // Load format parts from API
 async function loadFormatParts() {
   try {
@@ -76,7 +83,8 @@ async function readRFIDTags() {
     if (!response.ok) throw new Error(`HTTP error ${response.status}`);
     const data = await response.json();
     if (data.success && Array.isArray(data.tagIds)) {
-      rfidTags = ["", ...data.tagIds];
+      const sortedTagIds = sortAlphaNumeric(data.tagIds);
+      rfidTags = ["", ...sortedTagIds];
       console.log(`Loaded ${data.tagIds.length} RFID tags.`);
       updateDropdowns();
       return;
@@ -109,13 +117,14 @@ function updateDropdowns() {
 
     const optEmpty = document.createElement('option');
     optEmpty.value = "";
-    optEmpty.textContent = "(unassigned)";
+    optEmpty.textContent = (window.getTranslation ? window.getTranslation('unassigned') : '(unassigned)');
     select.appendChild(optEmpty);
 
     if (currentAssigned) {
       const optCurr = document.createElement('option');
       optCurr.value = currentAssigned;
-      optCurr.textContent = `${currentAssigned} (assigned)`;
+      const assignedLabel = (window.getTranslation ? window.getTranslation('assigned_label') : '(assigned)');
+      optCurr.textContent = `${currentAssigned} ${assignedLabel}`;
       optCurr.style.backgroundColor = '#d4edda';
       optCurr.style.color = '#155724';
       select.appendChild(optCurr);
@@ -133,7 +142,9 @@ function updateDropdowns() {
     usedElsewhere.forEach(tag => {
       const opt = document.createElement('option');
       opt.value = tag;
-      opt.textContent = `${tag} (assigned to ${assignedByTag[tag]})`;
+      const tpl = (window.getTranslation ? window.getTranslation('assigned_to') : '(assigned to %s)');
+      const txt = (window.formatTranslation ? window.formatTranslation(tpl, assignedByTag[tag]) : `${tag} (assigned to ${assignedByTag[tag]})`);
+      opt.textContent = `${tag} ${txt.replace('%s','')}`;
       opt.disabled = true;
       opt.style.backgroundColor = '#d4edda';
       opt.style.color = '#155724';
@@ -206,18 +217,22 @@ function updatePartsDisplay() {
   allList.innerHTML = '';
   assignedList.innerHTML = '';
   if (formatParts.length === 0) {
-    allList.innerHTML = '<div class="no-parts">No format parts available. Please upload an HTML file first.</div>';
-    assignedList.innerHTML = '<div class="no-parts">No parts to assign.</div>';
+    const noParts = (window.getTranslation ? window.getTranslation('no_format_parts') : 'No format parts available. Please upload an HTML file first.');
+    const noAssign = (window.getTranslation ? window.getTranslation('no_parts_to_assign') : 'No parts to assign.');
+    allList.innerHTML = `<div class="no-parts">${noParts}</div>`;
+    assignedList.innerHTML = `<div class="no-parts">${noAssign}</div>`;
     return;
   }
 
-  formatParts.forEach(p => {
+  const sortedParts = sortAlphaNumeric(formatParts.map(p => p.id));
+  sortedParts.forEach(partId => {
+    const p = { id: partId };
     const row = document.createElement('div');
     row.className = 'part-entry';
     row.innerHTML = `
       <label>${p.id}</label>
       <select id="select-${p.id}" class="rfid-select"></select>
-      <button onclick="assignRFID('${p.id}')">Assign</button>
+      <button onclick="assignRFID('${p.id}')">${window.getTranslation ? window.getTranslation('assign') : 'Assign'}</button>
     `;
     allList.appendChild(row);
 
@@ -226,8 +241,8 @@ function updatePartsDisplay() {
     assigned.innerHTML = `
       <label>${p.id}</label>
       <input type="checkbox" id="check-${p.id}" class="assign-check" disabled>
-      <button onClick="showPicture('${p.id}')">Show picture</button>
-  <button onClick="openUpload('${p.id}')">Upload</button>
+      <button onClick="showPicture('${p.id}')">${window.getTranslation ? window.getTranslation('show_picture') : 'Show picture'}</button>
+  <button onClick="openUpload('${p.id}')">${window.getTranslation ? window.getTranslation('upload') : 'Upload'}</button>
     `;
     assignedList.appendChild(assigned);
   });
@@ -402,7 +417,7 @@ function openUpload(partId) {
   uploadPartId = partId;
   const modal = ensureUploadModal();
   modal.style.display = 'flex';
-  modal.querySelector('#upload-title').textContent = `Upload Bild für ${partId}`;
+  modal.querySelector('#upload-title').textContent = (window.formatTranslation ? window.formatTranslation(window.getTranslation('upload_image'), partId) : `Upload Bild für ${partId}`);
 }
 
 // Close upload modal
@@ -469,11 +484,17 @@ async function handleFileSelected(ev) {
     const form = new FormData();
     form.append('file', file);
     const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
-    const data = await resp.json();
-    if (resp.ok && data.success) {
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    const data = contentType.includes('application/json') ? await resp.json() : null;
+    if (resp.ok && data && data.success) {
       status.textContent = 'Upload erfolgreich';
     } else {
-      status.textContent = 'Fehler beim Upload';
+      if (resp.status === 413) {
+        status.textContent = 'Fehler: Bild ist zu gross (HTTP 413)';
+      } else {
+        const detail = data && (data.detail || data.message);
+        status.textContent = detail ? `Fehler beim Upload: ${detail}` : `Fehler beim Upload (HTTP ${resp.status})`;
+      }
     }
   } catch (e) {
     status.textContent = 'Fehler: ' + e;
@@ -639,11 +660,17 @@ async function takeSnapshot() {
     const form = new FormData();
     form.append('image_base64', dataUrl);
     const resp = await fetch(`${API_BASE_URL}/api/pictures/${encodeURIComponent(uploadPartId)}`, { method: 'POST', body: form });
-    const data = await resp.json();
-    if (resp.ok && data.success) {
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    const data = contentType.includes('application/json') ? await resp.json() : null;
+    if (resp.ok && data && data.success) {
       status.textContent = 'Foto gespeichert';
     } else {
-      status.textContent = 'Fehler beim Speichern';
+      if (resp.status === 413) {
+        status.textContent = 'Fehler: Foto ist zu gross (HTTP 413)';
+      } else {
+        const detail = data && (data.detail || data.message);
+        status.textContent = detail ? `Fehler beim Speichern: ${detail}` : `Fehler beim Speichern (HTTP ${resp.status})`;
+      }
     }
   } catch (e) {
     status.textContent = 'Fehler: ' + e;

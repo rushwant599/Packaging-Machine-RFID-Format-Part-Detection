@@ -58,6 +58,7 @@ export default function SomicPage() {
   const [saveMsg, setSaveMsg] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [uploadLang, setUploadLang] = useState<"de" | "en">("de");
   const [openSection, setOpenSection] = useState<string | null>(null);
   const api = useAPI();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -182,7 +183,7 @@ export default function SomicPage() {
             </label>
             <input
               type="password"
-              className="w-full px-2 py-2 border rounded text-white"
+              className="w-full px-2 py-2 border rounded text-black dark:text-white"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoFocus
@@ -257,6 +258,20 @@ export default function SomicPage() {
                   <label htmlFor="html-upload" className="block text-sm font-medium text-black mb-1">
                     {t("upload_format_list")}
                   </label>
+                  <div className="mb-2">
+                    <label htmlFor="html-upload-lang" className="block text-xs font-medium text-black mb-1">
+                      {t("language")}
+                    </label>
+                    <select
+                      id="html-upload-lang"
+                      value={uploadLang}
+                      onChange={(e) => setUploadLang((e.target.value === "en" ? "en" : "de"))}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-black bg-white"
+                    >
+                      <option value="de">Deutsch (de)</option>
+                      <option value="en">English (en)</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -280,6 +295,7 @@ export default function SomicPage() {
                       if (file) {
                         const formData = new FormData();
                         formData.append("file", file);
+                        formData.append("lang", uploadLang);
                         const res = await fetch(`${backendUrl}/api/customer-html`, {
                           method: "POST",
                           body: formData,
@@ -294,7 +310,7 @@ export default function SomicPage() {
                     }}
                   />
                   {uploadMsg && (
-                    <div className={`mt-2 text-sm ${uploadMsg.includes("successfully") ? "text-green-600" : "text-red-600"}`}>{uploadMsg}</div>
+                    <div className={`mt-2 text-sm ${uploadMsg === t("html_upload_success") ? "text-green-600" : "text-red-600"}`}>{uploadMsg}</div>
                   )}
                 </div>
                 {loading ? (

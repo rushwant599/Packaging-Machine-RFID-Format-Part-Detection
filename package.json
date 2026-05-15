@@ -17,27 +17,23 @@
     "start:all": "concurrently \"npm run dev\" \"npm run backend\" --names \"FRONTEND,BACKEND\" --prefix-colors \"cyan,yellow\""
   },
   "dependencies": {
-    "next": "^16.1.6",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "next": "^16.2.6",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "overrides": {
+    "postcss": "^8.5.14"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "concurrently": "^9.2.1",
-    "eslint": "^10.0.0",
-    "eslint-config-next": "^16.1.6",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
-  },
-  "overrides": {
-    "ajv": "^8.18.0",
-    "minimatch": "^10.2.1",
-    "glob": "^8.1.0",
-    "rimraf": "^4.0.0",
-    "tmp": "^0.2.4"
+    "typescript": "^6"
   }
 }

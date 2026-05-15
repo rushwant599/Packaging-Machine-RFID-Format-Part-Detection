@@ -9,5 +9,5 @@ lxml==6.0.1
 asyncua==1.1.6
 websockets==15.0.1
 sqlalchemy==2.0.43
-aiosqlite==0.21.0
+aiosqlite==0.22.1
 greenlet==3.2.4
